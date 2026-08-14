@@ -1,6 +1,7 @@
 .venv 
 *.csv
 .claude
+old
 tsfresh_cache
 tsfresh_cache_scaler
 tsfresh_cache_smoke
