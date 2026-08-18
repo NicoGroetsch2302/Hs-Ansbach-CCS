@@ -1,0 +1,13 @@
+# Laufzeitumgebung der TEP-Notebooks (Stand 2026-08-18, Python 3.12.3).
+# Installation:  pip install -r requirements.txt
+numpy==2.4.6
+pandas==3.0.3
+scipy==1.17.1
+scikit-learn==1.9.0
+dyca==1.0.3
+tsfresh==0.21.2
+lazypredict==0.3.0
+matplotlib==3.11.0
+tqdm==4.68.2
+ipykernel==7.3.0
+jupyterlab==4.5.8
