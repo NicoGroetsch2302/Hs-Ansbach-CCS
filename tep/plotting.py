@@ -3,11 +3,18 @@
 Confusion-Matrizen kommen sowohl in `tep.tsfresh` (je Projektion) als auch
 in `tep.eigen` (je Feature-Satz) vor. Gezeichnet werden sie gleich - hier
 steht das Wie, damit es nicht in zwei Fassungen driftet.
+
+Die Klassenachse ist immer `LABELS` (Fault 0..20). Der TEP-Datensatz hat
+genau diese 21 Klassen, und weil die Beschriftungen zugleich die
+Zellindizes sind, koennen Achse und Matrix nicht auseinanderlaufen.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+
+from .core import LABELS
 
 
 def normalize_rows(cm: np.ndarray) -> np.ndarray:
@@ -22,7 +29,13 @@ def normalize_rows(cm: np.ndarray) -> np.ndarray:
                      where=row_sums > 0)
 
 
-def draw_confusion(ax, cm_norm: np.ndarray, labels, annot_min: float | None,
+def counts_frame(cm: np.ndarray) -> pd.DataFrame:
+    """Absolute Zaehlwerte als 21x21-DataFrame mit sprechenden Achsen."""
+    return pd.DataFrame(cm, index=[f"true_{i}" for i in LABELS],
+                        columns=[f"pred_{i}" for i in LABELS])
+
+
+def draw_confusion(ax, cm_norm: np.ndarray, annot_min: float | None,
                    tick_step: int = 1, gridlines: bool = True,
                    label_fontsize: int = 7):
     """Zeichnet EINE normierte Confusion-Matrix in eine Achse.
@@ -37,24 +50,24 @@ def draw_confusion(ax, cm_norm: np.ndarray, labels, annot_min: float | None,
 
     Rueckgabe: das AxesImage, fuer eine gemeinsame Colorbar.
     """
-    labels = list(labels)
     im = ax.imshow(cm_norm, cmap="Blues", vmin=0.0, vmax=1.0)
 
-    ax.set_xticks(labels[::tick_step])
-    ax.set_xticklabels(labels[::tick_step], fontsize=label_fontsize)
-    ax.set_yticks(labels[::tick_step])
-    ax.set_yticklabels(labels[::tick_step], fontsize=label_fontsize)
+    ticks = LABELS[::tick_step]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(ticks, fontsize=label_fontsize)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(ticks, fontsize=label_fontsize)
 
     if gridlines:
-        ax.set_xticks(np.arange(-0.5, len(labels), 1), minor=True)
-        ax.set_yticks(np.arange(-0.5, len(labels), 1), minor=True)
+        ax.set_xticks(np.arange(-0.5, len(LABELS), 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(LABELS), 1), minor=True)
         ax.grid(which="minor", color="white", linewidth=0.5)
         ax.tick_params(which="minor", length=0)
 
     if annot_min is not None:
         # Schriftfarbe wechselt auf dunklen Zellen zu weiss (Kontrast).
-        for i in range(len(labels)):
-            for j in range(len(labels)):
+        for i in LABELS:
+            for j in LABELS:
                 v = cm_norm[i, j]
                 if v < annot_min:
                     continue
@@ -64,32 +77,21 @@ def draw_confusion(ax, cm_norm: np.ndarray, labels, annot_min: float | None,
     return im
 
 
-def top_confusions(cm: np.ndarray, labels, top_n: int = 8) -> list:
-    """Die groessten Off-Diagonal-Eintraege als sortierte Liste.
+def print_top_confusions(cm: np.ndarray, top_n: int = 8,
+                         title: str = "") -> None:
+    """Die groessten Off-Diagonal-Eintraege als Textblock.
 
     Genau das, was man in der Grafik sucht: welche Klasse wird
     systematisch mit welcher verwechselt.
-
-    Rueckgabe: Liste von (wahr, vorhergesagt, n_runs, anteil).
     """
-    labels = list(labels)
+    if title:
+        print(f"=== {title}: groesste Verwechslungen (Top {top_n}) ===")
     err = cm.astype(float).copy()
     np.fill_diagonal(err, 0.0)              # Diagonale = Treffer
-    out = []
     for flat in np.argsort(err, axis=None)[::-1][:top_n]:
         i, j = np.unravel_index(flat, err.shape)
         n_runs = int(err[i, j])
         if n_runs == 0:
             break                           # ab hier nur noch Nullen
-        out.append((labels[i], labels[j], n_runs, n_runs / cm[i].sum()))
-    return out
-
-
-def print_top_confusions(cm: np.ndarray, labels, top_n: int = 8,
-                         title: str = "") -> None:
-    """top_confusions() als Textblock."""
-    if title:
-        print(f"=== {title}: groesste Verwechslungen (Top {top_n}) ===")
-    for true_c, pred_c, n_runs, share in top_confusions(cm, labels, top_n):
-        print(f"  wahr {true_c:>2d} -> vorhergesagt {pred_c:>2d}: "
-              f"{n_runs:4d} Runs ({share:.1%} der Klasse)")
+        print(f"  wahr {LABELS[i]:>2d} -> vorhergesagt {LABELS[j]:>2d}: "
+              f"{n_runs:4d} Runs ({n_runs / cm[i].sum():.1%} der Klasse)")

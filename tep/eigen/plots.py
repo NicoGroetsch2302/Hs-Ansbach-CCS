@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from .aggregate import value_columns
 from .config import SpectrumConfig
 from .spectra import get
 

@@ -33,8 +33,7 @@ from scipy import stats
 from sklearn.decomposition import PCA, FastICA
 
 from ..core import (PROC_COLS, dyca_amplitudes, flip_signs, inv_sqrt_psd,
-                    lag_stack)
-from ..core import scale as _core_scale
+                    lag_stack, scale)
 from .config import PipelineConfig
 
 
@@ -271,26 +270,8 @@ register("dycvda", Projector(
 
 
 # =========================================================================
-# Vorverarbeitung und Aufruf
+# Aufruf
 # =========================================================================
-
-def fit_scaler(cfg: PipelineConfig, verbose: bool = True):
-    """StandardScaler fitten - oder None, wenn er nicht gebraucht wird.
-
-    Bei scaling_mode="global_mean" bleiben die 250k Zeilen ungelesen.
-    """
-    if cfg.scaling_mode != "scaler":
-        return None
-    from ..core import fit_scaler as _core_fit_scaler
-    return _core_fit_scaler(cfg.data_path("TEP_FaultFree_Training.csv"),
-                            verbose=verbose)
-
-
-def scale(X: np.ndarray, cfg: PipelineConfig, scaler=None) -> np.ndarray:
-    """Vorverarbeitung VOR der Projektion, gesteuert ueber
-    cfg.scaling_mode."""
-    return _core_scale(X, cfg.scaling_mode, scaler)
-
 
 def project(X: np.ndarray, spec: tuple, cfg: PipelineConfig, scaler=None):
     """Projiziert einen Run.
@@ -302,7 +283,7 @@ def project(X: np.ndarray, spec: tuple, cfg: PipelineConfig, scaler=None):
     Konfiguration uebersprungen.
     """
     proj = get(spec)
-    Y = proj.apply(scale(X, cfg, scaler), spec, cfg)
+    Y = proj.apply(scale(X, cfg.scaling_mode, scaler), spec, cfg)
 
     # float64, NICHT float32: bei scaling_mode="global_mean" liegt die
     # Dynamik der DyCA-Amplituden 3-5 Groessenordnungen unter dem

@@ -11,18 +11,16 @@ Anders als bei `tep.tsfresh` sind die Features hier die Spektren selbst -
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              confusion_matrix)
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 
-from ..core import LABELS, META_COLS, PROC_COLS, fit_scaler
-from ..plotting import draw_confusion, normalize_rows, print_top_confusions
+from ..core import LABELS, META_COLS, PROC_COLS, default_estimator, fit_scaler
+from ..plotting import (counts_frame, draw_confusion, normalize_rows,
+                        print_top_confusions)
 from .config import SpectrumConfig
 from .spectra import get, run_spectra
 
@@ -195,8 +193,6 @@ class ClassifyConfig:
     cv_folds: int = 5
     select_metric: str = "Balanced Accuracy CV Mean"
     random_state: int = 42
-    use_gpu: bool = False
-    labels: list = field(default_factory=lambda: list(LABELS))
 
 
 def run_lazyclassifier(fs: FeatureSet, cc: ClassifyConfig | None = None):
@@ -211,15 +207,8 @@ def run_lazyclassifier(fs: FeatureSet, cc: ClassifyConfig | None = None):
     cc = cc or ClassifyConfig()
     Xtr, ytr, Xte, yte = fs.matrices()
 
-    kwargs = dict(verbose=0, ignore_warnings=True, predictions=False,
-                  random_state=cc.random_state, cv=cc.cv_folds)
-    if cc.use_gpu:
-        kwargs["use_gpu"] = True
-    try:
-        clf = LazyClassifier(**kwargs)
-    except TypeError:                       # aeltere lazypredict-Version
-        kwargs.pop("use_gpu", None)
-        clf = LazyClassifier(**kwargs)
+    clf = LazyClassifier(verbose=0, ignore_warnings=True, predictions=False,
+                         random_state=cc.random_state, cv=cc.cv_folds)
 
     print(f"=== {fs.name} ===")
     print(f"Features: {fs.n_features} | Train: {Xtr.shape[0]} | "
@@ -248,14 +237,6 @@ def run_lazyclassifier(fs: FeatureSet, cc: ClassifyConfig | None = None):
 # Confusion-Matrizen
 # =========================================================================
 
-def default_estimator(random_state: int = 42):
-    """StandardScaler + RandomForest - wie lazypredict das Modell intern
-    aufbaut."""
-    return make_pipeline(
-        StandardScaler(),
-        RandomForestClassifier(random_state=random_state, n_jobs=-1))
-
-
 def confusion(sets: list, cc: ClassifyConfig | None = None, estimator=None,
               report: bool = True) -> dict:
     """Fester Modelltyp auf jedem Feature-Satz, einmal auf dem Testset
@@ -269,7 +250,7 @@ def confusion(sets: list, cc: ClassifyConfig | None = None, estimator=None,
         model.fit(Xtr, ytr)
         y_pred = model.predict(Xte)
 
-        cm = confusion_matrix(yte, y_pred, labels=cc.labels)
+        cm = confusion_matrix(yte, y_pred, labels=LABELS)
         results[fs.name] = {
             "cm": cm, "cm_norm": normalize_rows(cm),
             "bal_acc": balanced_accuracy_score(yte, y_pred),
@@ -281,7 +262,7 @@ def confusion(sets: list, cc: ClassifyConfig | None = None, estimator=None,
               f"Test: {len(yte)} | Balanced Accuracy (Test): "
               f"{results[fs.name]['bal_acc']:.4f}")
         if report:
-            print(classification_report(yte, y_pred, labels=cc.labels,
+            print(classification_report(yte, y_pred, labels=LABELS,
                                         digits=3, zero_division=0))
 
     print("Zusammenfassung (Balanced Accuracy auf dem Testset):")
@@ -291,20 +272,15 @@ def confusion(sets: list, cc: ClassifyConfig | None = None, estimator=None,
     return results
 
 
-def counts(results: dict, labels=None) -> dict:
+def counts(results: dict) -> dict:
     """Absolute Zaehlwerte je Feature-Satz als 21x21-DataFrame."""
-    labels = list(LABELS if labels is None else labels)
-    return {name: pd.DataFrame(res["cm"],
-                               index=[f"true_{i}" for i in labels],
-                               columns=[f"pred_{i}" for i in labels])
-            for name, res in results.items()}
+    return {name: counts_frame(res["cm"]) for name, res in results.items()}
 
 
-def plot_confusions(results: dict, labels=None, annot_min: float = 0.05):
+def plot_confusions(results: dict, annot_min: float = 0.05):
     """Alle Matrizen nebeneinander, gemeinsame Farbskala 0..1."""
     import matplotlib.pyplot as plt
 
-    labels = list(LABELS if labels is None else labels)
     n = len(results)
     fig, axes = plt.subplots(1, n, figsize=(6.0 * n, 7.2),
                              constrained_layout=True)
@@ -312,7 +288,7 @@ def plot_confusions(results: dict, labels=None, annot_min: float = 0.05):
 
     im = None
     for ax, (name, res) in zip(axes, results.items()):
-        im = draw_confusion(ax, res["cm_norm"], labels, annot_min=annot_min)
+        im = draw_confusion(ax, res["cm_norm"], annot_min=annot_min)
         ax.set_title(f"{name}  ({res['n_features']} Features)\n"
                      f"Balanced Accuracy (Test) = {res['bal_acc']:.3f}",
                      fontsize=11)
@@ -327,9 +303,8 @@ def plot_confusions(results: dict, labels=None, annot_min: float = 0.05):
     return fig
 
 
-def report_confusions(results: dict, labels=None, top_n: int = 8) -> None:
+def report_confusions(results: dict, top_n: int = 8) -> None:
     """Die groessten Verwechslungen je Feature-Satz als Textblock."""
-    labels = list(LABELS if labels is None else labels)
     for name, res in results.items():
         print()
-        print_top_confusions(res["cm"], labels, top_n, title=name)
+        print_top_confusions(res["cm"], top_n, title=name)

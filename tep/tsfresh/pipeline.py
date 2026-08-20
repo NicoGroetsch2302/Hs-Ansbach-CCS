@@ -21,11 +21,12 @@ from lazypredict.Supervised import LazyClassifier
 from sklearn.metrics import balanced_accuracy_score, f1_score
 from tsfresh.feature_extraction.settings import from_columns
 
+from ..core import fit_scaler
 from .config import PipelineConfig
 from .data import labels_from_index, load_runs
 from .features import (extract_config, load_top_names, rank_features,
                        save_top_names)
-from .projections import config_name, fit_scaler, get, n_channels
+from .projections import config_name, get, n_channels
 
 
 class Pipeline:
@@ -41,7 +42,11 @@ class Pipeline:
         if len(set(self.names)) != len(self.names):
             raise ValueError(f"Doppelte Konfigurationsnamen: {self.names}")
 
-        self.scaler = fit_scaler(cfg, verbose=verbose)
+        # Nur bei scaling_mode="scaler" - sonst bleiben die 250k Zeilen
+        # Normalbetrieb ungelesen.
+        self.scaler = (
+            fit_scaler(cfg.data_path("TEP_FaultFree_Training.csv"), verbose)
+            if cfg.scaling_mode == "scaler" else None)
         self.train_top: dict = {}
         self.top_names: dict = {}
         self.test_top: dict = {}
@@ -213,11 +218,7 @@ class Pipeline:
                           random_state=cfg.random_state)
             if cfg.lc_cv_folds:
                 kwargs["cv"] = cfg.lc_cv_folds
-            try:
-                clf = LazyClassifier(**kwargs)
-            except TypeError:                  # aeltere lazypredict-Version
-                kwargs.pop("cv", None)
-                clf = LazyClassifier(**kwargs)
+            clf = LazyClassifier(**kwargs)
 
             t0 = time.perf_counter()
             models, preds = clf.fit(Xtr_v, Xte_v, ytr, yte)

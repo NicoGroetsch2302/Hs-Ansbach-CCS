@@ -15,11 +15,7 @@ from typing import Sequence
 from tsfresh.feature_extraction.settings import (
     ComprehensiveFCParameters, EfficientFCParameters, MinimalFCParameters)
 
-# Spaltennamen, Splits und Cutoffs kommen aus dem gemeinsamen Kern und
-# werden hier nur weitergereicht, damit die Notebooks sie ueber
-# tep.tsfresh erreichen.
-from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
-                    SCALING_MODES, SPLIT_FILES, XMEAS_COLS, XMV_COLS)
+from ..core import SCALING_MODES
 
 FC_MODES = {"minimal": MinimalFCParameters,
             "efficient": EfficientFCParameters,

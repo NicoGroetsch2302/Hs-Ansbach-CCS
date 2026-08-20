@@ -17,14 +17,11 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              confusion_matrix, f1_score)
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 
-from ..core import LABELS
-from ..plotting import (draw_confusion, normalize_rows,
+from ..core import LABELS, default_estimator
+from ..plotting import (counts_frame, draw_confusion, normalize_rows,
                         print_top_confusions)
 
 
@@ -35,11 +32,6 @@ class ConfusionResults:
     pred: pd.DataFrame           # Konfiguration, run_id, y_true, y_pred
     results: dict                # name -> cm, cm_norm, n_test, bal_acc, macro_f1
     counts: dict                 # name -> DataFrame der absoluten Zaehlwerte
-    labels: list = None
-
-    def __post_init__(self):
-        if self.labels is None:
-            self.labels = list(LABELS)
 
     @property
     def names(self) -> list:
@@ -57,28 +49,19 @@ class ConfusionResults:
         """
         tab = pd.DataFrame(
             {n: np.diag(self.results[n]["cm_norm"]) for n in self.names},
-            index=self.labels).T
+            index=LABELS).T
         tab.index.name = "Konfiguration"
         tab.columns.name = "faultNumber"
         return tab
 
 
-def default_estimator(random_state: int = 42):
-    """StandardScaler + RandomForest - der Modelltyp des Hauptvergleichs."""
-    return make_pipeline(
-        StandardScaler(),
-        RandomForestClassifier(random_state=random_state, n_jobs=-1))
-
-
-def confusion(pipe, refit: bool = False, estimator=None,
-              labels=None) -> ConfusionResults:
+def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
     """Vorhersagen holen (Cache oder Neuberechnung) und Matrizen bauen.
 
     refit=False nutzt den Vorhersage-Cache, falls vorhanden. refit=True
     ignoriert ihn und fittet neu - noetig, wenn estimator gewechselt wird.
     """
     cfg = pipe.cfg
-    labels = list(LABELS if labels is None else labels)
     order = list(pipe.names)
     path = cfg.cm_pred_path
 
@@ -123,14 +106,14 @@ def confusion(pipe, refit: bool = False, estimator=None,
         print(f"\nVorhersagen gespeichert: {path}")
 
     # --- Matrizen aufbauen ---------------------------------------------
-    # labels erzwingt die Reihenfolge 0..20 auch fuer Klassen, die nie
+    # LABELS erzwingt die Reihenfolge 0..20 auch fuer Klassen, die nie
     # vorhergesagt werden -> alle Matrizen sind deckungsgleich.
     results, counts = {}, {}
     for name in order:
         g = pred[pred["Konfiguration"] == name]
         if g.empty:
             continue
-        cm = confusion_matrix(g["y_true"], g["y_pred"], labels=labels)
+        cm = confusion_matrix(g["y_true"], g["y_pred"], labels=LABELS)
         # Zeilenweise normiert: Zelle (i,j) = Anteil der wahren Klasse i, der
         # als j vorhergesagt wurde; Diagonale = Recall.
         cm_norm = normalize_rows(cm)
@@ -140,9 +123,7 @@ def confusion(pipe, refit: bool = False, estimator=None,
             "macro_f1": f1_score(g["y_true"], g["y_pred"], average="macro",
                                  zero_division=0),
         }
-        counts[name] = pd.DataFrame(cm,
-                                    index=[f"true_{i}" for i in labels],
-                                    columns=[f"pred_{i}" for i in labels])
+        counts[name] = counts_frame(cm)
 
     # Abgleich mit Phase C: dieser RF muss die RandomForest-Zeile aus summary
     # reproduzieren. Kleine Abweichungen sind normal (RF-Zufallskomponente,
@@ -165,7 +146,7 @@ def confusion(pipe, refit: bool = False, estimator=None,
             f"Konfiguration? refit=True rechnet ihn neu.")
 
     res = ConfusionResults(order=order, pred=pred, results=results,
-                           counts=counts, labels=labels)
+                           counts=counts)
     print(f"\n{len(results)} Matrizen berechnet. Absolute Zaehlwerte stehen "
           f"in .counts, z.B. cm.counts['{res.names[0]}'].")
     return res
@@ -181,7 +162,6 @@ def plot_grid(cm: ConfusionResults, cfg, ncols: int = 4):
     import matplotlib.pyplot as plt
 
     names = cm.names
-    labels = cm.labels
     nrows = int(np.ceil(len(names) / ncols))
     fig, axes = plt.subplots(nrows, ncols,
                              figsize=(3.9 * ncols, 4.4 * nrows),
@@ -193,7 +173,7 @@ def plot_grid(cm: ConfusionResults, cfg, ncols: int = 4):
         res = cm.results[name]
         # annot_min=None und tick_step=2: im kleinen Panel waeren
         # Zellbeschriftung und 21 Ticks je Achse unlesbar.
-        im = draw_confusion(ax, res["cm_norm"], labels, annot_min=None,
+        im = draw_confusion(ax, res["cm_norm"], annot_min=None,
                             tick_step=2, gridlines=False, label_fontsize=6)
         ax.set_title(f"{name}\nMacro-F1 {res['macro_f1']:.3f} | "
                      f"BA {res['bal_acc']:.3f}", fontsize=10)
@@ -225,14 +205,13 @@ def plot_detail(cm: ConfusionResults, focus: str | None = None,
 
     focus = focus or cm.best()
     res = cm.results[focus]
-    labels = cm.labels
     g = cm.pred[cm.pred["Konfiguration"] == focus]
 
     # figsize: imshow erzwingt ein quadratisches Panel - die Hoehe ist also
     # Breite minus Colorbar/Beschriftung, plus der zweizeilige Titel. Wird
     # die Figur flacher, schneidet sie die erste Titelzeile ab.
     fig, ax = plt.subplots(figsize=(9, 9.2), constrained_layout=True)
-    im = draw_confusion(ax, res["cm_norm"], labels, annot_min=annot_min,
+    im = draw_confusion(ax, res["cm_norm"], annot_min=annot_min,
                         tick_step=1, gridlines=True, label_fontsize=7)
 
     ax.set_title(f"RandomForestClassifier | {focus} - Confusion-Matrix "
@@ -249,13 +228,13 @@ def plot_detail(cm: ConfusionResults, focus: str | None = None,
         # zero_division=0: Klassen ohne einzige Vorhersage bekommen
         # Precision 0 statt einer UndefinedMetricWarning.
         print(f"=== {focus}: Bericht je Klasse ===")
-        print(classification_report(g["y_true"], g["y_pred"], labels=labels,
+        print(classification_report(g["y_true"], g["y_pred"], labels=LABELS,
                                     digits=3, zero_division=0))
 
         # Die groessten Off-Diagonal-Eintraege = die systematischen
         # Verwechslungen. Genau das, was man in der Grafik sucht, hier als
         # sortierte Liste.
-        print_top_confusions(res["cm"], labels, top_n, title=focus)
+        print_top_confusions(res["cm"], top_n, title=focus)
 
     return fig, focus
 
@@ -265,7 +244,6 @@ def plot_recall(cm: ConfusionResults, n_worst: int = 5):
     import matplotlib.pyplot as plt
 
     tab = cm.recall_table()
-    labels = cm.labels
     fig, ax = plt.subplots(figsize=(13, 0.42 * len(tab) + 1.8),
                            constrained_layout=True)
     # aspect="auto": die Tabelle ist breit und flach, quadratische Zellen
@@ -273,8 +251,8 @@ def plot_recall(cm: ConfusionResults, n_worst: int = 5):
     im = ax.imshow(tab.to_numpy(), cmap="Blues", vmin=0.0, vmax=1.0,
                    aspect="auto")
 
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, fontsize=8)
+    ax.set_xticks(range(len(LABELS)))
+    ax.set_xticklabels(LABELS, fontsize=8)
     ax.set_yticks(range(len(tab)))
     ax.set_yticklabels(tab.index, fontsize=8)
     ax.set_xlabel("Fault-Klasse")

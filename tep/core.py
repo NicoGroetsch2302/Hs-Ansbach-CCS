@@ -152,6 +152,22 @@ def dyca_amplitudes(X: np.ndarray, m: int, n: int) -> np.ndarray:
 
 
 # =========================================================================
+# Modell
+# =========================================================================
+
+def default_estimator(random_state: int = 42):
+    """StandardScaler + RandomForest - wie lazypredict das Modell intern
+    aufbaut. Beide Familien vergleichen ihre Feature-Saetze damit."""
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    return make_pipeline(
+        StandardScaler(),
+        RandomForestClassifier(random_state=random_state, n_jobs=-1))
+
+
+# =========================================================================
 # Umgebung
 # =========================================================================
 

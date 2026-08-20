@@ -53,10 +53,6 @@ class Spectrum:
     csv_stem    Dateiname-Stamm des Exports ("pca_eigenvalues")
     apply       (X_scaled, ctx) -> Wertevektor, oder (Vektor, extras-dict)
     scalar      True, wenn das Verfahren EINE Zahl je Run liefert (LDA)
-    tolerant    True: Ausnahmen je Run werden gezaehlt und der Run
-                uebersprungen. False: die Ausnahme schlaegt durch. Das
-                bildet die urspruenglichen Notebooks ab - PCA und DPCA
-                hatten kein try/except, die anderen schon.
     min_samples cfg -> Mindestlaenge eines Runs; kuerzere werden
                 uebersprungen. None = keine Pruefung.
     forced_scaling  erzwingt einen Skalierungsmodus (LDA: "scaler")
@@ -67,7 +63,6 @@ class Spectrum:
     csv_stem: str
     apply: Callable
     scalar: bool = False
-    tolerant: bool = True
     min_samples: Callable | None = None
     forced_scaling: str | None = None
     extra_cols: tuple = ()
@@ -116,7 +111,7 @@ def _apply_pca(X, ctx):
 
 register("pca", Spectrum(
     prefix="lambda_", label="PCA", csv_stem="pca_eigenvalues",
-    apply=_apply_pca, tolerant=False,
+    apply=_apply_pca,
 ))
 
 
@@ -142,7 +137,7 @@ def _apply_dpca(X, ctx):
 
 register("dpca", Spectrum(
     prefix="dpca_", label="DPCA", csv_stem="dpca_eigenvalues",
-    apply=_apply_dpca, tolerant=False,
+    apply=_apply_dpca,
 ))
 
 
@@ -302,8 +297,8 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
             X = scale(g[PROC_COLS].values, mode, scaler)
             out = spec.apply(X, ctx)
         except Exception as exc:
-            if not spec.tolerant:
-                raise
+            # Ein einzelner numerisch gescheiterter Run darf eine Schleife
+            # ueber 10 500 Laeufe nicht abbrechen - gezaehlt und weiter.
             n_err += 1
             if len(first_errors) < 5:
                 first_errors.append(f"  fault={fault}, run={run}: {exc}")
@@ -342,8 +337,7 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
         print(f"Erfolgreiche Runs: {len(df)}")
         if limit is not None:
             print(f"Uebersprungen   : {n_skip} (weniger als {limit} Samples)")
-        if spec.tolerant:
-            print(f"Fehler          : {n_err}")
+        print(f"Fehler          : {n_err}")
         if "converged" in df.columns:
             n_conv = int(df["converged"].sum())
             print(f"FastICA konvergiert: {n_conv} / {len(df)} "
