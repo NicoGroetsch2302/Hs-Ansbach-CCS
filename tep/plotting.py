@@ -77,6 +77,46 @@ def draw_confusion(ax, cm_norm: np.ndarray, annot_min: float | None,
     return im
 
 
+def plot_grid(mats, titles, suptitle: str, ncols: int | None = None,
+              big: bool = False, annot_min: float | None = None):
+    """Mehrere normierte Matrizen als Raster, gemeinsame Farbskala 0..1.
+
+    big : grosse Panels (wenige nebeneinander) bekommen jeden Tick und
+          Gitterlinien, kleine nicht - dort waere beides unlesbar.
+          Steuert auch Panelgroesse und Colorbar.
+    annot_min : ab diesem Anteil wird eine Zelle beschriftet, None = gar
+          nicht. Im kleinen Panel bleibt die Schrift ohnehin unlesbar.
+    ncols : None = alles in eine Zeile.
+    """
+    import matplotlib.pyplot as plt
+
+    ncols = ncols or len(mats)
+    nrows = int(np.ceil(len(mats) / ncols))
+    w, h = (6.0, 7.2) if big else (3.9, 4.4)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(w * ncols, h * nrows),
+                             constrained_layout=True)
+    axes = np.atleast_1d(axes).ravel()
+
+    im = None
+    for ax, cm_norm, title in zip(axes, mats, titles):
+        im = draw_confusion(ax, cm_norm, annot_min=annot_min,
+                            tick_step=1 if big else 2, gridlines=big,
+                            label_fontsize=7 if big else 6)
+        ax.set_title(title, fontsize=11 if big else 10)
+        ax.set_xlabel("Vorhergesagte Klasse", fontsize=8)
+        ax.set_ylabel("Wahre Klasse", fontsize=8)
+
+    for ax in axes[len(mats):]:             # ungenutzte Panels ausblenden
+        ax.axis("off")
+
+    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.85 if big else 0.6,
+                        pad=0.02)
+    cbar.set_label("Anteil der wahren Klasse (Zeilensumme = 1)")
+    fig.suptitle(suptitle, fontsize=14)
+    plt.show()
+    return fig
+
+
 def print_top_confusions(cm: np.ndarray, top_n: int = 8,
                          title: str = "") -> None:
     """Die groessten Off-Diagonal-Eintraege als Textblock.

@@ -21,8 +21,9 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              confusion_matrix, f1_score)
 
 from ..core import LABELS, default_estimator
-from ..plotting import (counts_frame, draw_confusion, normalize_rows,
-                        print_top_confusions)
+from ..plotting import counts_frame, draw_confusion, normalize_rows
+from ..plotting import plot_grid as grid
+from ..plotting import print_top_confusions
 
 
 @dataclass
@@ -77,8 +78,7 @@ def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
                 "Cache -> zuerst Phase A und B ausfuehren (laufen aus dem "
                 "Chunk-Cache).")
         idx_tr, idx_te = pipe.common_runs()
-        if idx_tr is not None:
-            print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
+        print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
 
         parts = []
         for name in order:
@@ -159,37 +159,13 @@ def plot_grid(cm: ConfusionResults, cfg, ncols: int = 4):
     Die Zellen werden hier NICHT beschriftet - bei vielen 21x21-Panels waere
     die Schrift unlesbar. Exakte Zahlen: cm.counts[name] oder plot_detail().
     """
-    import matplotlib.pyplot as plt
-
-    names = cm.names
-    nrows = int(np.ceil(len(names) / ncols))
-    fig, axes = plt.subplots(nrows, ncols,
-                             figsize=(3.9 * ncols, 4.4 * nrows),
-                             constrained_layout=True)
-    axes = np.atleast_1d(axes).ravel()
-
-    im = None
-    for ax, name in zip(axes, names):
-        res = cm.results[name]
-        # annot_min=None und tick_step=2: im kleinen Panel waeren
-        # Zellbeschriftung und 21 Ticks je Achse unlesbar.
-        im = draw_confusion(ax, res["cm_norm"], annot_min=None,
-                            tick_step=2, gridlines=False, label_fontsize=6)
-        ax.set_title(f"{name}\nMacro-F1 {res['macro_f1']:.3f} | "
-                     f"BA {res['bal_acc']:.3f}", fontsize=10)
-        ax.set_xlabel("Vorhergesagte Klasse", fontsize=8)
-        ax.set_ylabel("Wahre Klasse", fontsize=8)
-
-    for ax in axes[len(names):]:            # ungenutzte Panels ausblenden
-        ax.axis("off")
-
-    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.6, pad=0.02)
-    cbar.set_label("Anteil der wahren Klasse (Zeilensumme = 1)")
-    fig.suptitle("RandomForestClassifier - Confusion-Matrizen je "
-                 f"Konfiguration (Testset, Top-{cfg.top_k} Features)",
-                 fontsize=14)
-    plt.show()
-    return fig
+    return grid(
+        [cm.results[n]["cm_norm"] for n in cm.names],
+        [f"{n}\nMacro-F1 {cm.results[n]['macro_f1']:.3f} | "
+         f"BA {cm.results[n]['bal_acc']:.3f}" for n in cm.names],
+        "RandomForestClassifier - Confusion-Matrizen je Konfiguration "
+        f"(Testset, Top-{cfg.top_k} Features)",
+        ncols=ncols)
 
 
 def plot_detail(cm: ConfusionResults, focus: str | None = None,

@@ -13,7 +13,7 @@ steht in `run_spectra`.
     "ica"    |Kurtosis| der FastICA-Quellen, absteigend    -> ica_1..12
     "lda"    Fisher-Kennzahl gegen einen Normalbetriebslauf-> lda_eigenvalue
 
-Eigene Verfahren kommen ueber `register()` dazu.
+Eigene Verfahren kommen ueber einen Eintrag in `SPECTRA` dazu.
 
 WICHTIG - die Spaltennamen und die CSV-Namen sind eingefroren:
 `LazyClassifier_PCA_DyCA` liest die exportierten Dateien.
@@ -30,14 +30,9 @@ import pandas as pd
 from scipy import stats
 from sklearn.decomposition import PCA, FastICA
 from sklearn.exceptions import ConvergenceWarning
+from tqdm.auto import tqdm
 
-from ..core import PROC_COLS, inv_sqrt_psd, lag_stack, scale
-
-try:
-    from tqdm.auto import tqdm
-    TQDM = True
-except ImportError:                                    # pragma: no cover
-    TQDM = False
+from ..core import PROC_COLS, cva_covs, inv_sqrt_psd, lag_stack, scale
 
 
 # =========================================================================
@@ -71,11 +66,6 @@ class Spectrum:
 SPECTRA: dict = {}
 
 
-def register(method: str, spectrum: Spectrum) -> None:
-    """Traegt ein Verfahren unter `method` ein (ueberschreibt vorhandene)."""
-    SPECTRA[method] = spectrum
-
-
 def get(method: str) -> Spectrum:
     if method not in SPECTRA:
         raise ValueError(f"Unbekanntes Verfahren: {method!r} "
@@ -87,7 +77,6 @@ def get(method: str) -> Spectrum:
 class Context:
     """Was ein Verfahren ausser den Messdaten noch braucht."""
     cfg: object
-    scaler: object = None
     ff_by_run: dict = field(default_factory=dict)
     fault: int = 0
     run: int = 0
@@ -109,10 +98,9 @@ def _apply_pca(X, ctx):
     return pca.explained_variance_ratio_
 
 
-register("pca", Spectrum(
+SPECTRA["pca"] = Spectrum(
     prefix="lambda_", label="PCA", csv_stem="pca_eigenvalues",
-    apply=_apply_pca,
-))
+    apply=_apply_pca)
 
 
 def _apply_dyca(X, ctx):
@@ -121,11 +109,10 @@ def _apply_dyca(X, ctx):
     return np.asarray(res["generalized_eigenvalues"], dtype=float)
 
 
-register("dyca", Spectrum(
+SPECTRA["dyca"] = Spectrum(
     prefix="dyca_", label="DyCA", csv_stem="dyca_eigenvalues",
     apply=_apply_dyca,
-    min_samples=lambda cfg: max(cfg.dyca_m, cfg.dyca_n) + 5,
-))
+    min_samples=lambda cfg: max(cfg.dyca_m, cfg.dyca_n) + 5)
 
 
 def _apply_dpca(X, ctx):
@@ -135,10 +122,9 @@ def _apply_dpca(X, ctx):
     return pca.explained_variance_ratio_
 
 
-register("dpca", Spectrum(
+SPECTRA["dpca"] = Spectrum(
     prefix="dpca_", label="DPCA", csv_stem="dpca_eigenvalues",
-    apply=_apply_dpca,
-))
+    apply=_apply_dpca)
 
 
 def _apply_cva(X, ctx):
@@ -146,17 +132,9 @@ def _apply_cva(X, ctx):
     Zukunftsstapel: H = S_ff^(-1/2) S_fp S_pp^(-1/2), die Singulaerwerte
     von H sind die Korrelationen und liegen in [0, 1]."""
     cfg = ctx.cfg
-    X = np.asarray(X, dtype=np.float64)
-    past, fut, ridge = cfg.cva_past, cfg.cva_fut, cfg.ridge_rel
-    T = X.shape[0]
-    P = np.hstack([X[past - j: T - fut + 1 - j] for j in range(1, past + 1)])
-    F = np.hstack([X[past + j: T - fut + 1 + j] for j in range(fut)])
-    N = P.shape[0]
-    Pc = P - P.mean(axis=0)
-    Fc = F - F.mean(axis=0)
-    Spp = Pc.T @ Pc / (N - 1)
-    Sff = Fc.T @ Fc / (N - 1)
-    Sfp = Fc.T @ Pc / (N - 1)
+    ridge = cfg.ridge_rel
+    _, _, Spp, Sff, Sfp = cva_covs(np.asarray(X, dtype=np.float64),
+                                   cfg.cva_past, cfg.cva_fut)
     H = inv_sqrt_psd(Sff, ridge) @ Sfp @ inv_sqrt_psd(Spp, ridge)
     corrs = np.linalg.svd(H, compute_uv=False)
     # Floating-Point-Rauschen kann winzige negative Werte bzw. Werte
@@ -164,11 +142,10 @@ def _apply_cva(X, ctx):
     return np.clip(corrs, 0.0, 1.0)
 
 
-register("cva", Spectrum(
+SPECTRA["cva"] = Spectrum(
     prefix="cva_", label="CVA", csv_stem="cva_eigenvalues",
     apply=_apply_cva,
-    min_samples=lambda cfg: len(PROC_COLS) + cfg.cva_past + cfg.cva_fut + 5,
-))
+    min_samples=lambda cfg: len(PROC_COLS) + cfg.cva_past + cfg.cva_fut + 5)
 
 
 def _apply_ica(X, ctx):
@@ -190,10 +167,9 @@ def _apply_ica(X, ctx):
     return kurt[order], {"converged": int(converged)}
 
 
-register("ica", Spectrum(
+SPECTRA["ica"] = Spectrum(
     prefix="ica_", label="ICA", csv_stem="ica_eigenvalues",
-    apply=_apply_ica, extra_cols=("converged",),
-))
+    apply=_apply_ica, extra_cols=("converged",))
 
 
 def lda_eigenvalue(X0: np.ndarray, X1: np.ndarray, ridge_rel: float) -> float:
@@ -233,14 +209,13 @@ def _apply_lda(X, ctx):
     return np.array([lda_eigenvalue(X0, X1, ctx.cfg.ridge_rel)])
 
 
-register("lda", Spectrum(
+SPECTRA["lda"] = Spectrum(
     prefix="lda_eigenvalue", label="LDA", csv_stem="lda_eigenvalues",
     apply=_apply_lda, scalar=True,
     # LDA vergleicht ZWEI Laeufe. Bei "global_mean" zoege jeder Lauf
     # seinen eigenen skalaren Mittelwert ab - die Mittelwertsdifferenz d,
     # also genau das Signal, waere dann verfaelscht.
-    forced_scaling="scaler",
-))
+    forced_scaling="scaler")
 
 
 # =========================================================================
@@ -261,12 +236,12 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
               f"scaling_mode='{spec.forced_scaling}' "
               f"(cfg sagt '{cfg.scaling_mode}').")
 
-    ctx = Context(cfg=cfg, scaler=scaler, ff_by_run=ff_by_run or {})
+    ctx = Context(cfg=cfg, ff_by_run=ff_by_run or {})
     limit = spec.min_samples(cfg) if spec.min_samples else None
 
-    grouped = df_all.groupby(["faultNumber", "simulationRun"], sort=True)
-    iterator = tqdm(grouped, desc=f"Berechne {spec.label}-Spektrum pro Run") \
-        if TQDM else grouped
+    iterator = tqdm(df_all.groupby(["faultNumber", "simulationRun"],
+                                   sort=True),
+                    desc=f"Berechne {spec.label}-Spektrum pro Run")
 
     records, first_errors = [], []
     n_err = n_skip = 0
@@ -276,7 +251,7 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
         # 1 h nach Simulationsstart injiziert (20 Samples bei 3-min-
         # Sampling); die ersten Samples sind effektiv Normalbetrieb und
         # wuerden die Fault-Statistik verwaessern.
-        if cfg.drop_pre_fault and fault != 0:
+        if fault != 0:
             group = group[group["sample"] >= cfg.pre_fault_cutoff]
         if limit is not None and len(group) < limit:
             n_skip += 1

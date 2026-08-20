@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from ..core import SCALING_MODES
+from ..core import PRE_FAULT_CUTOFF, SCALING_MODES
 
 
 @dataclass
@@ -39,8 +39,7 @@ class SpectrumConfig:
     data_dir: str = "."
 
     # --- Datenumfang ---
-    drop_pre_fault: bool = True
-    pre_fault_cutoff: int = 21          # erstes Post-Fault-Sample (Train)
+    pre_fault_cutoff: int = PRE_FAULT_CUTOFF["train"]
     runs_per_fault: int | None = None   # None = alle 500 Runs je Fault
 
     # --- Verfahrensparameter ---
@@ -65,7 +64,7 @@ class SpectrumConfig:
     # angeglichen werden: dort deckt ein Run 500 (Fault 0) bzw. 480
     # (Fault != 0) Samples ab, im Test waeren es 960 bzw. 800. Ohne
     # Kuerzung waeren Train- und Test-Spektren systematisch verschieden.
-    test_pre_fault_cutoff: int = 161
+    test_pre_fault_cutoff: int = PRE_FAULT_CUTOFF["test"]
     test_head_fault0: int | None = 500
     test_head_faulty: int | None = 480
 
@@ -104,13 +103,19 @@ class SpectrumConfig:
         return self.spectrum.label
 
     @property
-    def csv_name(self) -> str:
+    def needs_scaler(self) -> bool:
+        """Ob ein StandardScaler gefittet werden muss: bei
+        scaling_mode="scaler" und immer bei LDA (erzwingt ihn)."""
+        return (self.scaling_mode == "scaler"
+                or self.spectrum.forced_scaling == "scaler")
+
+    def csv_name(self, split: str = "train") -> str:
         """Dateiname der Export-CSV.
 
         Die Namen sind eingefroren - `LazyClassifier_PCA_DyCA` liest sie.
         """
         suffix = "" if self.scaling_mode == "global_mean" else "_scaler"
-        return f"{self.spectrum.csv_stem}_train{suffix}.csv"
+        return f"{self.spectrum.csv_stem}_{split}{suffix}.csv"
 
     def data_path(self, fname: str) -> str:
         return os.path.join(self.data_dir, fname)

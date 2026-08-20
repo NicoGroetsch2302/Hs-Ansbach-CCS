@@ -136,6 +136,23 @@ def inv_sqrt_psd(S: np.ndarray, ridge_rel: float) -> np.ndarray:
     return (V / np.sqrt(w)) @ V.T
 
 
+def cva_covs(X: np.ndarray, past: int, fut: int):
+    """Vergangenheits- und Zukunftsstapel eines Runs samt Kovarianzen.
+
+    Rueckgabe: (Pc, Fc, Spp, Sff, Sfp) - die zentrierten Stapel und die
+    drei Kovarianzmatrizen. Basis von CVA (Zeitreihe -> Variaten) UND
+    DyCVDA (DyCA-Amplituden -> Dissimilaritaet, dort past = fut = s).
+    """
+    T = X.shape[0]
+    P = np.hstack([X[past - j: T - fut + 1 - j] for j in range(1, past + 1)])
+    F = np.hstack([X[past + j: T - fut + 1 + j] for j in range(fut)])
+    N = P.shape[0]
+    Pc = P - P.mean(axis=0)
+    Fc = F - F.mean(axis=0)
+    return (Pc, Fc, Pc.T @ Pc / (N - 1), Fc.T @ Fc / (N - 1),
+            Fc.T @ Pc / (N - 1))
+
+
 def dyca_amplitudes(X: np.ndarray, m: int, n: int) -> np.ndarray:
     """DyCA-Amplituden als (T, n). Wirft bei numerischem Scheitern
     ("Negative eigenvalues") eine Exception."""

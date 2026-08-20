@@ -17,7 +17,6 @@ from __future__ import annotations
 import numpy as np
 
 from .config import SpectrumConfig
-from .spectra import get
 
 
 def transform(vals, mode: str = "log"):
@@ -296,11 +295,3 @@ def plot_dyca_mn_estimate(cfg: SpectrumConfig, df_ff, scaler=None,
     print("Legen die Plots eine andere Wahl nahe, in der Konfigurations-"
           "zelle aendern und neu ausfuehren.")
     return fig
-
-
-def plot_all(cfg: SpectrumConfig, agg_df):
-    """Alle zum Verfahren passenden Standardplots nacheinander."""
-    if get(cfg.method).scalar:
-        return plot_scalar(cfg, agg_df)
-    return (plot_means(cfg, agg_df), plot_stds(cfg, agg_df),
-            plot_cv(cfg, agg_df), plot_bars(cfg, agg_df))

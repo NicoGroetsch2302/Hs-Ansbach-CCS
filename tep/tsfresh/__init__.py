@@ -35,24 +35,23 @@ from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
 from .config import PipelineConfig
 from .confusion import ConfusionResults, confusion
 from .confusion import plot_detail as plot_confusion_detail
-from .confusion import plot_grid as plot_confusion_grid
 from .confusion import plot_recall
 from .data import load_runs
 from .features import extract_config, rank_features
 from .pipeline import Pipeline
 from .projections import (PROJECTORS, Projector, channel_names, config_name,
-                          n_channels, project, register)
+                          n_channels, project)
 from .reporting import Comparison, compare, plot_comparison
 
 __all__ = [
     "PipelineConfig", "Pipeline",
     "PROC_COLS", "META_COLS", "SPLIT_FILES", "PRE_FAULT_CUTOFF", "LABELS",
     "load_runs", "run_id", "labels_from_index",
-    "PROJECTORS", "Projector", "register", "project", "config_name",
+    "PROJECTORS", "Projector", "project", "config_name",
     "channel_names", "n_channels",
     "extract_config", "rank_features",
     "compare", "plot_comparison", "Comparison",
-    "confusion", "ConfusionResults", "plot_confusion_grid",
+    "confusion", "ConfusionResults",
     "plot_confusion_detail", "plot_recall",
     "versions",
 ]

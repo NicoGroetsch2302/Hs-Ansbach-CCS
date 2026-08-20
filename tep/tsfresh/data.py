@@ -16,18 +16,15 @@ from ..core import (META_COLS, PRE_FAULT_CUTOFF, PROC_COLS, SPLIT_FILES,
                     labels_from_index, run_id)
 from .config import PipelineConfig
 
-__all__ = ["load_runs", "run_id", "labels_from_index"]
-
 
 def load_runs(cfg: PipelineConfig, split: str, verbose: bool = True) -> dict:
     """Liest einen Split ("train" | "test").
 
     Verwirft die Pre-Fault-Phase und kuerzt auf ``cfg.run_length``, damit
     Train (500 Samples/Run) und Test (960) dasselbe Zeitfenster nach
-    Fehlereintritt abdecken. Bei ``cfg.uniform_length`` wird der Cutoff
-    auch auf Fault 0 angewandt - sonst wuerden laengenabhaengige
-    TSFresh-Features (length, abs_energy, ...) den Normalbetrieb rein
-    artifiziell abtrennen.
+    Fehlereintritt abdecken. Der Cutoff gilt auch fuer Fault 0 - sonst
+    wuerden laengenabhaengige TSFresh-Features (length, abs_energy, ...)
+    den Normalbetrieb rein artifiziell abtrennen.
     """
     cutoff = PRE_FAULT_CUTOFF[split]
     dtypes = {c: "float32" for c in PROC_COLS}
@@ -48,8 +45,7 @@ def load_runs(cfg: PipelineConfig, split: str, verbose: bool = True) -> dict:
         for (fault, run), g in df.groupby(["faultNumber", "simulationRun"],
                                           sort=True):
             g = g.sort_values("sample")            # klein: <= 960 Zeilen
-            if fault != 0 or cfg.uniform_length:
-                g = g[g["sample"] >= cutoff]
+            g = g[g["sample"] >= cutoff]
             arr = g[PROC_COLS].to_numpy(dtype=np.float32)
             if cfg.run_length is not None:
                 if arr.shape[0] < cfg.run_length:
@@ -70,5 +66,5 @@ def load_runs(cfg: PipelineConfig, split: str, verbose: bool = True) -> dict:
         if len(lens) > 1:
             print("  ACHTUNG: unterschiedliche Runlaengen -> laengen"
                   "abhaengige TSFresh-Features (length, abs_energy, ...) "
-                  "trennen Klassen artifiziell. uniform_length pruefen!")
+                  "trennen Klassen artifiziell. run_length pruefen!")
     return runs

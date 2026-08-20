@@ -77,6 +77,3 @@ nicht in zwei Fassungen driften.
 
 `chunk_runs=250` muss bleiben, solange der TSFresh-Cache geteilt wird: die
 Chunk-Dateien hängen über ihren Index an dieser Aufteilung.
-
-[`_backup_scaler_notebooks/`](_backup_scaler_notebooks) enthält die
-`scaling_mode="scaler"`-Läufe derselben Notebooks.

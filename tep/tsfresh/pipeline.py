@@ -169,14 +169,12 @@ class Pipeline:
     # -- gemeinsame Run-Menge -------------------------------------------
     def common_runs(self):
         """(train_index, test_index) der ueber ALLE Konfigurationen
-        gemeinsamen Runs, oder (None, None) wenn abgeschaltet.
+        gemeinsamen Runs.
 
         Die DyCA-Stufe kann an einzelnen Runs numerisch scheitern; ohne
         diesen Schnitt waeren die Konfigurationen auf unterschiedlichen
         Testmengen bewertet.
         """
-        if not self.cfg.restrict_to_common_runs:
-            return None, None
         if not self.train_top or not self.test_top:
             raise RuntimeError("train_top/test_top fehlen -> zuerst Phase A "
                                "und B ausfuehren.")
@@ -190,9 +188,8 @@ class Pipeline:
         """(Xtr, Xte, ytr, yte) einer Konfiguration - gemeinsame Runs,
         NaN/inf aufgefuellt. Genau die Datenbasis von Phase C."""
         idx_tr, idx_te = self.common_runs()
-        Xtr, Xte = self.train_top[name], self.test_top[name]
-        if idx_tr is not None:
-            Xtr, Xte = Xtr.loc[idx_tr], Xte.loc[idx_te]
+        Xtr = self.train_top[name].loc[idx_tr]
+        Xte = self.test_top[name].loc[idx_te]
         ytr = labels_from_index(Xtr.index).to_numpy()
         yte = labels_from_index(Xte.index).to_numpy()
         # NaN/inf koennen aus Featureberechnungen stammen -> auffuellen.
@@ -207,18 +204,15 @@ class Pipeline:
         """LazyClassifier je Konfiguration; schreibt die summary-CSV."""
         cfg = self.cfg
         idx_tr, idx_te = self.common_runs()
-        if idx_tr is not None:
-            print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
+        print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
 
         rows = []
         for spec, name in self:
             Xtr_v, Xte_v, ytr, yte, _ = self.matrices(name)
 
-            kwargs = dict(verbose=0, ignore_warnings=True, predictions=True,
-                          random_state=cfg.random_state)
-            if cfg.lc_cv_folds:
-                kwargs["cv"] = cfg.lc_cv_folds
-            clf = LazyClassifier(**kwargs)
+            clf = LazyClassifier(verbose=0, ignore_warnings=True,
+                                 predictions=True, cv=cfg.lc_cv_folds,
+                                 random_state=cfg.random_state)
 
             t0 = time.perf_counter()
             models, preds = clf.fit(Xtr_v, Xte_v, ytr, yte)
@@ -274,7 +268,7 @@ def _cv_val(models: pd.DataFrame, col: str, model_name: str) -> float:
     scheitert und ALLE CV-Spalten des Modells werden geleert.
     """
     if col not in models.columns:
-        return np.nan                          # lc_cv_folds = 0
+        return np.nan
     v = models[col].get(model_name, np.nan)
     return np.nan if v is None or pd.isna(v) else float(v)
 

@@ -20,6 +20,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from sklearn.feature_selection import f_classif
+from tqdm.auto import tqdm
 from tsfresh import extract_features
 from tsfresh.feature_selection.relevance import calculate_relevance_table
 from tsfresh.utilities.dataframe_functions import impute
@@ -27,12 +28,6 @@ from tsfresh.utilities.dataframe_functions import impute
 from .config import PipelineConfig
 from .data import run_id
 from .projections import config_name, project
-
-try:
-    from tqdm.auto import tqdm
-    TQDM = True
-except ImportError:                                    # pragma: no cover
-    TQDM = False
 
 
 def chunk_path(cfg: PipelineConfig, spec, split: str, tag: str, idx: int) -> str:
@@ -76,9 +71,8 @@ def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
     keys = sorted(runs.keys())
     parts, n_failed = [], 0
 
-    it = range(0, len(keys), cfg.chunk_runs)
-    if TQDM:
-        it = tqdm(list(it), desc=f"{name:20s} [{split}/{tag}]")
+    it = tqdm(list(range(0, len(keys), cfg.chunk_runs)),
+              desc=f"{name:20s} [{split}/{tag}]")
 
     for ci, start in enumerate(it):
         path = chunk_path(cfg, spec, split, tag, ci)

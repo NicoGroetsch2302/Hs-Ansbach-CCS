@@ -70,8 +70,8 @@ def compare(pipe, model: str = MAIN_MODEL, verbose: bool = True) -> Comparison:
 
     # --- Sauber: Modellauswahl ueber die Train-CV -----------------------
     # Modelle ohne predict_proba haben keine CV-Werte und fallen hier
-    # heraus - im Test-Maximum oben sind sie weiter dabei. Die Spalte gibt
-    # es erst seit lc_cv_folds > 0; aeltere summary-CSVs haben sie nicht.
+    # heraus - im Test-Maximum oben sind sie weiter dabei. Aeltere
+    # summary-CSVs haben die Spalte gar nicht.
     cv_best = None
     if ("BalancedAccCVMean" in summary.columns
             and summary["BalancedAccCVMean"].notna().any()):
@@ -90,8 +90,8 @@ def compare(pipe, model: str = MAIN_MODEL, verbose: bool = True) -> Comparison:
                   f"{n_cv.min()}-{n_cv.max()} (ohne predict_proba gibt es "
                   f"keine).")
     elif verbose:
-        print("\nKeine CV-Spalten in summary (lc_cv_folds = 0 oder aeltere "
-              "CSV) -> CV-Auswahl entfaellt.")
+        print("\nKeine CV-Spalten in summary (aeltere CSV) -> CV-Auswahl "
+              "entfaellt.")
 
     return Comparison(order=order, summary=summary, main=main,
                       best_per_config=best, cv_best=cv_best, main_model=model)
@@ -150,9 +150,8 @@ def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
     # verdecken. pad haelt den Titel frei.
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.01), ncol=2,
               frameon=False)
-    runs = "gemeinsame" if cfg.restrict_to_common_runs else "alle"
     ax.set_title(f"TSFresh: {cmp.main_model} je Konfiguration (Balken) vs. "
                  f"bestes Modell (Raute) - {cfg.label}, Top-{cfg.top_k} "
-                 f"Features, {runs} Runs", pad=46)
+                 f"Features, gemeinsame Runs", pad=46)
     plt.show()
     return fig

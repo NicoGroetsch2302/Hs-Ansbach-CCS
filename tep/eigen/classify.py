@@ -19,10 +19,10 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              confusion_matrix)
 
 from ..core import LABELS, META_COLS, PROC_COLS, default_estimator, fit_scaler
-from ..plotting import (counts_frame, draw_confusion, normalize_rows,
+from ..plotting import (counts_frame, normalize_rows, plot_grid,
                         print_top_confusions)
 from .config import SpectrumConfig
-from .spectra import get, run_spectra
+from .spectra import run_spectra
 
 KEYS = ["faultNumber", "simulationRun"]
 
@@ -30,11 +30,6 @@ KEYS = ["faultNumber", "simulationRun"]
 # =========================================================================
 # Test-Spektren
 # =========================================================================
-
-def test_csv_name(cfg: SpectrumConfig) -> str:
-    suffix = "" if cfg.scaling_mode == "global_mean" else "_scaler"
-    return f"{get(cfg.method).csv_stem}_test{suffix}.csv"
-
 
 def test_spectra(cfgs, verbose: bool = True) -> dict:
     """Spektren auf dem TESTsplit - aus dem CSV-Cache oder frisch gerechnet.
@@ -49,7 +44,7 @@ def test_spectra(cfgs, verbose: bool = True) -> dict:
     """
     out, todo = {}, []
     for cfg in cfgs:
-        path = cfg.data_path(test_csv_name(cfg))
+        path = cfg.data_path(cfg.csv_name("test"))
         if os.path.exists(path):
             out[cfg.method] = pd.read_csv(path)
             if verbose:
@@ -61,8 +56,7 @@ def test_spectra(cfgs, verbose: bool = True) -> dict:
     if todo:
         first = todo[0]
         scaler = None
-        if any(c.scaling_mode == "scaler"
-               or get(c.method).forced_scaling == "scaler" for c in todo):
+        if any(c.needs_scaler for c in todo):
             scaler = fit_scaler(
                 first.data_path("TEP_FaultFree_Training.csv"), verbose)
 
@@ -87,7 +81,7 @@ def test_spectra(cfgs, verbose: bool = True) -> dict:
         for cfg in todo:
             df = run_spectra(cfg.as_test(), test_all, scaler=scaler,
                              verbose=verbose)
-            path = cfg.data_path(test_csv_name(cfg))
+            path = cfg.data_path(cfg.csv_name("test"))
             df.to_csv(path, index=False)
             out[cfg.method] = df
             if verbose:
@@ -101,7 +95,7 @@ def train_spectra(cfgs, verbose: bool = True) -> dict:
     """Die von den Eigenwert-Notebooks exportierten Trainings-CSVs laden."""
     out = {}
     for cfg in cfgs:
-        path = cfg.data_path(cfg.csv_name)
+        path = cfg.data_path(cfg.csv_name())
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"'{path}' nicht gefunden. Bitte zuerst das "
@@ -279,28 +273,13 @@ def counts(results: dict) -> dict:
 
 def plot_confusions(results: dict, annot_min: float = 0.05):
     """Alle Matrizen nebeneinander, gemeinsame Farbskala 0..1."""
-    import matplotlib.pyplot as plt
-
-    n = len(results)
-    fig, axes = plt.subplots(1, n, figsize=(6.0 * n, 7.2),
-                             constrained_layout=True)
-    axes = np.atleast_1d(axes).ravel()
-
-    im = None
-    for ax, (name, res) in zip(axes, results.items()):
-        im = draw_confusion(ax, res["cm_norm"], annot_min=annot_min)
-        ax.set_title(f"{name}  ({res['n_features']} Features)\n"
-                     f"Balanced Accuracy (Test) = {res['bal_acc']:.3f}",
-                     fontsize=11)
-        ax.set_xlabel("Vorhergesagte Klasse")
-        ax.set_ylabel("Wahre Klasse")
-
-    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.85, pad=0.02)
-    cbar.set_label("Anteil der wahren Klasse (Zeilensumme = 1)")
-    fig.suptitle("RandomForestClassifier - Confusion-Matrizen auf dem "
-                 "TEP-Testset", fontsize=14)
-    plt.show()
-    return fig
+    return plot_grid(
+        [res["cm_norm"] for res in results.values()],
+        [f"{name}  ({res['n_features']} Features)\n"
+         f"Balanced Accuracy (Test) = {res['bal_acc']:.3f}"
+         for name, res in results.items()],
+        "RandomForestClassifier - Confusion-Matrizen auf dem TEP-Testset",
+        big=True, annot_min=annot_min)
 
 
 def report_confusions(results: dict, top_n: int = 8) -> None:

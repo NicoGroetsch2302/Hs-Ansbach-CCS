@@ -13,8 +13,8 @@ Specs es fahren will:
     ("ica", n)                      FastICA
     ("dycvda", m, n, s, r)          DyCVDA (Wu et al. 2026)
 
-Eigene Verfahren kommen ueber register() dazu, ohne die Notebooks
-anzufassen.
+Eigene Verfahren kommen ueber einen Eintrag in PROJECTORS dazu, ohne die
+Notebooks anzufassen.
 
 WICHTIG - Vertraeglichkeit mit dem Cache: die Rechnungen hier sind
 zeilengetreu aus den urspruenglichen Notebooks uebernommen, inklusive der
@@ -32,8 +32,8 @@ import numpy as np
 from scipy import stats
 from sklearn.decomposition import PCA, FastICA
 
-from ..core import (PROC_COLS, dyca_amplitudes, flip_signs, inv_sqrt_psd,
-                    lag_stack, scale)
+from ..core import (PROC_COLS, cva_covs, dyca_amplitudes, flip_signs,
+                    inv_sqrt_psd, lag_stack, scale)
 from .config import PipelineConfig
 
 
@@ -62,11 +62,6 @@ class Projector:
 PROJECTORS: dict = {}
 
 
-def register(kind: str, projector: Projector) -> None:
-    """Traegt ein Verfahren unter kind ein (ueberschreibt vorhandene)."""
-    PROJECTORS[kind] = projector
-
-
 def get(spec: tuple) -> Projector:
     kind = spec[0]
     if kind not in PROJECTORS:
@@ -89,23 +84,14 @@ def n_channels(spec: tuple) -> int:
 
 
 # =========================================================================
-# Bausteine
-# =========================================================================
-
-# flip_signs, lag_stack, inv_sqrt_psd und dyca_amplitudes stehen in
-# tep/core.py - tep.eigen braucht dieselben Bausteine.
-
-
-# =========================================================================
 # Die Verfahren
 # =========================================================================
 
-register("raw", Projector(
+PROJECTORS["raw"] = Projector(
     name=lambda spec: "raw",
     channels=lambda spec: list(PROC_COLS),
     apply=lambda X, spec, cfg: X,
-    flip=False,
-))
+    flip=False)
 
 
 def _apply_pca(X, spec, cfg):
@@ -116,11 +102,10 @@ def _apply_pca(X, spec, cfg):
     return PCA(n_components=spec[1], svd_solver="full").fit_transform(X)
 
 
-register("pca", Projector(
+PROJECTORS["pca"] = Projector(
     name=lambda spec: f"pca_{spec[1]}",
     channels=lambda spec: [f"pc{i}" for i in range(1, spec[1] + 1)],
-    apply=_apply_pca,
-))
+    apply=_apply_pca)
 
 
 def _apply_dyca(X, spec, cfg):
@@ -132,12 +117,11 @@ def _validate_dyca(spec):
     assert m >= n - m, f"dyca verlangt m >= n - m, verletzt von {(m, n)}"
 
 
-register("dyca", Projector(
+PROJECTORS["dyca"] = Projector(
     name=lambda spec: f"dyca_m{spec[1]}_n{spec[2]}",
     channels=lambda spec: [f"dy{i}" for i in range(1, spec[2] + 1)],
     apply=_apply_dyca,
-    validate=_validate_dyca,
-))
+    validate=_validate_dyca)
 
 
 def _apply_dpca(X, spec, cfg):
@@ -147,11 +131,10 @@ def _apply_dpca(X, spec, cfg):
     return PCA(n_components=spec[1], svd_solver="full").fit_transform(Z)
 
 
-register("dpca", Projector(
+PROJECTORS["dpca"] = Projector(
     name=lambda spec: f"dpca_{spec[1]}",
     channels=lambda spec: [f"dpc{i}" for i in range(1, spec[1] + 1)],
-    apply=_apply_dpca,
-))
+    apply=_apply_dpca)
 
 
 def _apply_cva(X, spec, cfg):
@@ -163,18 +146,9 @@ def _apply_cva(X, spec, cfg):
     mit S_pp^(-1/2)) die Projektionsmatrix J auf, z_t = J^T (p_t - mean).
     Die Variaten haben Einheitsvarianz.
     """
-    X = np.asarray(X, dtype=np.float64)
     n = spec[1]
-    T = X.shape[0]
-    past, fut = cfg.cva_past, cfg.cva_fut
-    P = np.hstack([X[past - j: T - fut + 1 - j] for j in range(1, past + 1)])
-    F = np.hstack([X[past + j: T - fut + 1 + j] for j in range(fut)])
-    N = P.shape[0]
-    Pc = P - P.mean(axis=0)
-    Fc = F - F.mean(axis=0)
-    Spp = Pc.T @ Pc / (N - 1)
-    Sff = Fc.T @ Fc / (N - 1)
-    Sfp = Fc.T @ Pc / (N - 1)
+    Pc, _, Spp, Sff, Sfp = cva_covs(np.asarray(X, dtype=np.float64),
+                                    cfg.cva_past, cfg.cva_fut)
     Wp = inv_sqrt_psd(Spp, cfg.cva_ridge_rel)
     Wf = inv_sqrt_psd(Sff, cfg.cva_ridge_rel)
     _, _, Vt = np.linalg.svd(Wf @ Sfp @ Wp)
@@ -182,11 +156,10 @@ def _apply_cva(X, spec, cfg):
     return Pc @ J
 
 
-register("cva", Projector(
+PROJECTORS["cva"] = Projector(
     name=lambda spec: f"cva_{spec[1]}",
     channels=lambda spec: [f"cv{i}" for i in range(1, spec[1] + 1)],
-    apply=_apply_cva,
-))
+    apply=_apply_cva)
 
 
 def _apply_ica(X, spec, cfg):
@@ -206,11 +179,10 @@ def _apply_ica(X, spec, cfg):
     return S[:, np.argsort(-np.abs(kurt))]
 
 
-register("ica", Projector(
+PROJECTORS["ica"] = Projector(
     name=lambda spec: f"ica_{spec[1]}",
     channels=lambda spec: [f"ic{i}" for i in range(1, spec[1] + 1)],
-    apply=_apply_ica,
-))
+    apply=_apply_ica)
 
 
 def _apply_dycvda(X, spec, cfg):
@@ -235,16 +207,8 @@ def _apply_dycvda(X, spec, cfg):
     m, n, s, r = spec[1:]
     Y = dyca_amplitudes(np.asarray(X, dtype=np.float64), m, n)   # (T, n)
 
-    T = Y.shape[0]
     # Gueltige Zeitpunkte (0-basiert): t = s .. T-s  ->  T - 2s + 1 Zeilen.
-    P = np.hstack([Y[s - j: T - s - j + 1] for j in range(1, s + 1)])
-    F = np.hstack([Y[s + j: T - s + j + 1] for j in range(s)])
-    N = P.shape[0]
-    Pc = P - P.mean(axis=0)
-    Fc = F - F.mean(axis=0)
-    Spp = Pc.T @ Pc / (N - 1)
-    Sff = Fc.T @ Fc / (N - 1)
-    Sfp = Fc.T @ Pc / (N - 1)
+    Pc, Fc, Spp, Sff, Sfp = cva_covs(Y, s, s)
     Wp = inv_sqrt_psd(Spp, cfg.cva_ridge_rel)
     Wf = inv_sqrt_psd(Sff, cfg.cva_ridge_rel)
     U, sv, Vt = np.linalg.svd(Wf @ Sfp @ Wp)
@@ -259,14 +223,13 @@ def _validate_dycvda(spec):
     assert r <= n * s, f"r <= n*s verletzt von {(m, n, s, r)}"
 
 
-register("dycvda", Projector(
+PROJECTORS["dycvda"] = Projector(
     name=lambda spec: f"dycvda_m{spec[1]}n{spec[2]}_s{spec[3]}_r{spec[4]}",
     # Kanalordnung: kanonische Korrelation absteigend (cvd1 = staerkste) -
     # deterministisch, keine Ordnungswillkuer wie bei ICA.
     channels=lambda spec: [f"cvd{i}" for i in range(1, spec[4] + 1)],
     apply=_apply_dycvda,
-    validate=_validate_dycvda,
-))
+    validate=_validate_dycvda)
 
 
 # =========================================================================
@@ -291,6 +254,6 @@ def project(X: np.ndarray, spec: tuple, cfg: PipelineConfig, scaler=None):
     # informativen Anteil wegquantisieren. Der Speicherpreis ist klein -
     # gecacht wird spaeter ohnehin nur die Feature-Matrix als float32.
     Y = np.ascontiguousarray(Y, dtype=np.float64)
-    if cfg.fix_signs and proj.flip:
+    if proj.flip:
         Y = flip_signs(Y)
     return Y, proj.channels(spec)

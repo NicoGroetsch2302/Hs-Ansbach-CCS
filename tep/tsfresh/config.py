@@ -70,7 +70,6 @@ class PipelineConfig:
     # --- Datenumfang ---
     data_dir: str = "."
     runs_per_fault: int | None = None      # None = alle 500 Runs je Fault
-    uniform_length: bool = True            # Cutoff auch auf Fault 0 anwenden
     run_length: int | None = 480           # gemeinsame Laenge; None = aus
 
     # --- Feature-Extraktion und -Auswahl ---
@@ -81,15 +80,13 @@ class PipelineConfig:
     n_jobs: int | None = None              # None -> os.cpu_count(); 0 = seriell
 
     # --- Modellvergleich ---
-    restrict_to_common_runs: bool = True   # identische Run-Menge ueberall
-    lc_cv_folds: int = 5                   # 0 = kein CV (nur Train/Test)
+    lc_cv_folds: int = 5                   # Folds der Train-CV
     random_state: int = 42
 
     # --- Projektionsparameter (nur fuer die jeweiligen Verfahren) ---
     # ACHTUNG: Diese Werte stecken NICHT im Konfigurationsnamen und damit
     # nicht im Cache-Praefix. Bei Aenderung vorher die betroffenen Chunks
     # aus dem Cache-Ordner loeschen.
-    fix_signs: bool = True                 # Vorzeichenkonvention je Kanal
     dpca_lags: int = 2                     # DPCA: Lags L
     cva_past: int = 1                      # CVA: Vergangenheitsfenster p
     cva_fut: int = 1                       # CVA: Zukunftsfenster f
