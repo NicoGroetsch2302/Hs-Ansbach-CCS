@@ -9,11 +9,12 @@ Drei Blickwinkel auf dieselbe summary-Tabelle:
                    TESTSET. Leicht optimistisch (Winner's Curse).
   CV-Auswahl       bestes Modell je Konfiguration nach der Train-CV,
                    berichtet mit seinen Testwerten. Kein Testset-Blick.
+
+`compare()` liefert ein dict mit genau diesen drei Sichten plus der
+Konfigurationsordnung.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -21,26 +22,13 @@ import pandas as pd
 MAIN_MODEL = "RandomForestClassifier"
 
 
-@dataclass
-class Comparison:
-    """Ergebnis von compare(): drei Sichten plus die Konfigurationsordnung."""
-    order: list
-    summary: pd.DataFrame
-    main: pd.DataFrame                    # festes Modell je Konfiguration
-    best_per_config: pd.DataFrame         # Auswahl auf dem Testset
-    cv_best: pd.DataFrame | None          # Auswahl auf der Train-CV
-    main_model: str = MAIN_MODEL
-
-
-def compare(pipe, model: str = MAIN_MODEL, verbose: bool = True) -> Comparison:
-    """Baut die drei Vergleichssichten aus pipe.summary.
+def compare(summary: pd.DataFrame, order: list, model: str = MAIN_MODEL,
+            verbose: bool = True) -> dict:
+    """Baut die drei Vergleichssichten aus der summary-Tabelle.
 
     Laeuft auch OHNE Phase C, sobald die summary-CSV im Cache liegt -
-    pipe.load_summary() holt sie.
+    pipeline.load_summary() holt sie.
     """
-    summary = pipe.load_summary()
-    order = list(pipe.names)
-
     def in_order(df):
         out = df.copy()
         out["_o"] = out["Konfiguration"].map(order.index)
@@ -60,8 +48,7 @@ def compare(pipe, model: str = MAIN_MODEL, verbose: bool = True) -> Comparison:
     # Ueber idxmax die GANZE Zeile holen - groupby().first() wuerde
     # spaltenweise arbeiten und koennte Modellname und Score aus
     # verschiedenen Zeilen mischen.
-    best = summary.loc[
-        summary.groupby("Konfiguration")["MacroF1"].idxmax()]
+    best = summary.loc[summary.groupby("Konfiguration")["MacroF1"].idxmax()]
     best = in_order(best).reset_index(drop=True)
     if verbose:
         print("\nExplorativ - bestes Modell je Konfiguration "
@@ -93,11 +80,12 @@ def compare(pipe, model: str = MAIN_MODEL, verbose: bool = True) -> Comparison:
         print("\nKeine CV-Spalten in summary (aeltere CSV) -> CV-Auswahl "
               "entfaellt.")
 
-    return Comparison(order=order, summary=summary, main=main,
-                      best_per_config=best, cv_best=cv_best, main_model=model)
+    return {"order": order, "summary": summary, "main": main,
+            "best_per_config": best, "cv_best": cv_best, "main_model": model}
 
 
-def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
+def plot_comparison(cmp: dict, label: str = "", top_k: int = 100,
+                    figsize=(14.5, 5.5)):
     """Balken = festes Modell (fairer Konfigurationsvergleich). Rauten =
     bestes Modell je Konfiguration, ausgewaehlt auf dem TESTSET (leicht
     optimistisch). Offene Kreise = das auf der Train-CV gewaehlte Modell,
@@ -105,10 +93,10 @@ def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
     der Preis des Winner's Curse."""
     import matplotlib.pyplot as plt
 
-    order = cmp.order
-    main_d = (cmp.main.set_index("Konfiguration").reindex(order)
-              if not cmp.main.empty else pd.DataFrame(index=order))
-    best_d = cmp.best_per_config.set_index("Konfiguration").reindex(order)
+    order, main_model = cmp["order"], cmp["main_model"]
+    main_d = (cmp["main"].set_index("Konfiguration").reindex(order)
+              if not cmp["main"].empty else pd.DataFrame(index=order))
+    best_d = cmp["best_per_config"].set_index("Konfiguration").reindex(order)
 
     x = np.arange(len(order))
     w = 0.38
@@ -119,11 +107,10 @@ def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
     # Balken.
     nan_col = pd.Series(np.nan, index=order)
     b1 = ax.bar(x - w / 2, main_d.get("MacroF1", nan_col), w,
-                label=f"Macro-F1 ({cmp.main_model})", color="#4C78A8",
-                zorder=2)
+                label=f"Macro-F1 ({main_model})", color="#4C78A8", zorder=2)
     b2 = ax.bar(x + w / 2, main_d.get("BalancedAcc", nan_col), w,
-                label=f"Balanced Accuracy ({cmp.main_model})",
-                color="#F58518", zorder=2)
+                label=f"Balanced Accuracy ({main_model})", color="#F58518",
+                zorder=2)
     for bars in (b1, b2):
         vals = [b.get_height() for b in bars]
         ax.bar_label(bars,
@@ -133,8 +120,8 @@ def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
     ax.scatter(x, best_d["MacroF1"], marker="D", s=32, color="#2f2f2f",
                zorder=3, label="bestes Modell (Macro-F1, Auswahl auf Test)")
 
-    if cmp.cv_best is not None:
-        cv_d = cmp.cv_best.set_index("Konfiguration").reindex(order)
+    if cmp["cv_best"] is not None:
+        cv_d = cmp["cv_best"].set_index("Konfiguration").reindex(order)
         ax.scatter(x, cv_d["MacroF1"], marker="o", s=44, facecolors="none",
                    edgecolors="#2f2f2f", linewidths=1.2, zorder=4,
                    label="CV-gewaehltes Modell (Macro-F1 auf Test)")
@@ -150,8 +137,8 @@ def plot_comparison(cmp: Comparison, cfg, figsize=(14.5, 5.5)):
     # verdecken. pad haelt den Titel frei.
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.01), ncol=2,
               frameon=False)
-    ax.set_title(f"TSFresh: {cmp.main_model} je Konfiguration (Balken) vs. "
-                 f"bestes Modell (Raute) - {cfg.label}, Top-{cfg.top_k} "
+    ax.set_title(f"TSFresh: {main_model} je Konfiguration (Balken) vs. "
+                 f"bestes Modell (Raute) - {label}, Top-{top_k} "
                  f"Features, gemeinsame Runs", pad=46)
     plt.show()
     return fig

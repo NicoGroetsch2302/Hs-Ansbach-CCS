@@ -59,21 +59,28 @@ Notebooks teilen sich dessen Cache und sind direkt vergleichbar.
 ```
 tep/core.py      Spaltennamen, Splits, Cutoffs, Vorverarbeitung, lineare Algebra
 tep/plotting.py  Confusion-Matrizen
-tep/eigen/       SpectrumConfig, Spektren-Registry, Aggregation, Plots, Klassifikation
-tep/tsfresh/     PipelineConfig, Projektions-Registry, Feature-Cache, Phase A/B/C
+tep/eigen/       Spektren-Registry, Aggregation, Plots, Klassifikation
+tep/tsfresh/     Projektions-Registry, Feature-Cache, Phase A/B/C
 ```
 
+Nur Funktionen — keine Konfigurationsobjekte, keine Zustandsklassen. Jede
+Funktion nimmt als Argumente entgegen, was sie braucht, und gibt zurück, was
+die nächste braucht; die Einstellungen stehen als Konstanten oben im Notebook.
+Die beiden Registries (`SPECTRA`, `PROJECTORS`) sind gewöhnliche dicts, ein
+eigenes Verfahren ist ein weiterer Eintrag darin.
+
 Beide Familien teilen `tep.core` — `PROC_COLS`, Cutoffs und Skalierung dürfen
-nicht in zwei Fassungen driften.
+nicht in zwei Fassungen driften. `python test_tep.py` prüft die geteilten
+Bausteine und beide Registries.
 
 ## Zwei Stellschrauben, die man kennen sollte
 
-- **`scaling_mode`** — `"global_mean"` zieht einen skalaren Gesamtmittelwert ab
+- **`SCALING_MODE`** — `"global_mean"` zieht einen skalaren Gesamtmittelwert ab
   (Rohvarianzen bleiben, große Variablen dominieren), `"scaler"` standardisiert
   spaltenweise in Normalbetriebs-Einheiten. Der Modus steckt im Namen der
-  Ergebnis-CSV, ein Umschalten überschreibt also nichts.
-- **Probeläufe** — `runs_per_fault=3` (Eigenwerte) bzw. `smoke_test=True`
+  Ergebnis-CSV und im Cache-Ordner, ein Umschalten überschreibt also nichts.
+- **Probeläufe** — `RUNS_PER_FAULT=3` (Eigenwerte) bzw. `SMOKE_TEST=True`
   (TSFresh) machen aus Stunden Minuten, in einem eigenen Cache-Ordner.
 
-`chunk_runs=250` muss bleiben, solange der TSFresh-Cache geteilt wird: die
+`CHUNK_RUNS=250` muss bleiben, solange der TSFresh-Cache geteilt wird: die
 Chunk-Dateien hängen über ihren Index an dieser Aufteilung.

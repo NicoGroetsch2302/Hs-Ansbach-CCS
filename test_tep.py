@@ -1,9 +1,14 @@
-"""Selbsttest der linearalgebraischen Bausteine: python test_tep.py
+"""Selbsttest der Bausteine: python test_tep.py
 
-Deckt ab, was beim Entschlacken zusammengelegt wurde - vor allem
-cva_covs(), das jetzt in CVA (eigen), CVA (tsfresh) und DyCVDA steckt.
-Bricht das, weichen alle drei Verfahren still von den gecachten
-Ergebnissen ab.
+Deckt ab, was beim Umbau zusammengelegt wurde:
+
+  cva_covs()   steckt jetzt in CVA (eigen), CVA (tsfresh) und DyCVDA.
+               Bricht das, weichen alle drei still von den gecachten
+               Ergebnissen ab.
+  Registries   SPECTRA und PROJECTORS sind einfache dicts - ein Tippfehler
+               im Schluessel faellt sonst erst mitten im Nachtlauf auf.
+  Namen        csv_name()/needs_scaler() bestimmen, welche CSV geschrieben
+               und ob der Scaler gefittet wird.
 """
 
 import numpy as np
@@ -65,20 +70,64 @@ def test_inv_sqrt_psd():
     assert np.allclose(W @ S @ W, np.eye(6), atol=1e-8)
 
 
-def test_config_csv_names():
-    """Der Skalierungsmodus steckt im Dateinamen, Split auch."""
-    from tep.eigen import SpectrumConfig
+def test_spectra_registry():
+    """Jeder SPECTRA-Eintrag hat die Pflichtschluessel und callable apply."""
+    from tep.eigen.spectra import SPECTRA, csv_name, get, min_samples
 
-    cfg = SpectrumConfig(method="pca")
-    assert cfg.csv_name() == "pca_eigenvalues_train.csv"
-    assert cfg.csv_name("test") == "pca_eigenvalues_test.csv"
-    assert not cfg.needs_scaler
+    assert set(SPECTRA) == {"pca", "dyca", "dpca", "cva", "ica", "lda"}
+    for method, spec in SPECTRA.items():
+        for key in ("prefix", "label", "csv_stem", "apply"):
+            assert key in spec, (method, key)
+        assert callable(spec["apply"]), method
+        assert get(method) is spec
+    # nur DyCA und CVA brauchen eine Mindestlaenge
+    assert min_samples("pca") is None
+    assert min_samples("dyca", dyca_m=6, dyca_n=12) == 17
+    assert min_samples("cva", cva_past=1, cva_fut=1) == 52 + 1 + 1 + 5
+    # Die CSV-Namen sind eingefroren - LazyClassifier_PCA_DyCA liest sie.
+    assert csv_name("pca") == "pca_eigenvalues_train.csv"
+    assert csv_name("dyca", "scaler", "test") == "dyca_eigenvalues_test_scaler.csv"
 
-    sc = SpectrumConfig(method="pca", scaling_mode="scaler")
-    assert sc.csv_name() == "pca_eigenvalues_train_scaler.csv"
-    assert sc.needs_scaler
-    # LDA erzwingt den Scaler, auch wenn die Konfiguration global_mean sagt.
-    assert SpectrumConfig(method="lda").needs_scaler
+
+def test_needs_scaler():
+    """LDA erzwingt den Scaler, sonst entscheidet der Modus."""
+    from tep.eigen.spectra import needs_scaler
+
+    assert not needs_scaler("pca", "global_mean")
+    assert needs_scaler("pca", "scaler")
+    assert needs_scaler("lda", "global_mean")
+
+
+def test_projector_registry():
+    """Jeder PROJECTORS-Eintrag liefert Namen und Kanaele zu seiner Spec."""
+    from tep.tsfresh.projections import (PROJECTORS, channel_names,
+                                         config_name, n_channels, validate)
+
+    specs = [("raw",), ("pca", 6), ("dyca", 6, 12), ("dpca", 4),
+             ("cva", 8), ("ica", 12), ("dycvda", 6, 12, 2, 15)]
+    assert {s[0] for s in specs} == set(PROJECTORS)
+    for spec in specs:
+        assert callable(PROJECTORS[spec[0]]["apply"]), spec
+        assert isinstance(config_name(spec), str), spec
+        assert len(channel_names(spec)) == n_channels(spec), spec
+    # Die Namen sind Cache-Praefixe - eine Aenderung entwertet den Cache.
+    assert config_name(("dyca", 6, 12)) == "dyca_m6_n12"
+    assert config_name(("dycvda", 6, 12, 2, 15)) == "dycvda_m6n12_s2_r15"
+    assert validate(specs) == [config_name(s) for s in specs]
+
+
+def test_validate_rejects_bad_specs():
+    """Rangbedingungen und doppelte Namen fliegen vor dem Lauf auf."""
+    from tep.tsfresh.projections import validate
+
+    for bad in [[("dyca", 2, 6)],                  # m >= n - m verletzt
+                [("dycvda", 6, 12, 2, 40)],        # r <= n*s verletzt
+                [("pca", 6), ("pca", 6)]]:         # doppelter Name
+        try:
+            validate(bad)
+        except (AssertionError, ValueError):
+            continue
+        raise AssertionError(f"validate({bad}) haette scheitern muessen")
 
 
 if __name__ == "__main__":

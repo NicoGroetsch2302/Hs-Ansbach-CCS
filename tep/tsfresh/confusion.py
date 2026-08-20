@@ -5,6 +5,13 @@ Konfigurationen -> die Unterschiede zwischen den Matrizen liegen allein an
 den Features. Datenbasis exakt wie Phase C: gemeinsame Runs, gleiche
 NaN-Behandlung, StandardScaler + RandomForest (wie lazypredict intern).
 
+`confusion()` liefert ein dict:
+
+    {"order":   Konfigurationsnamen in Notebook-Reihenfolge,
+     "pred":    DataFrame Konfiguration/run_id/y_true/y_pred,
+     "results": name -> {cm, cm_norm, n_test, bal_acc, macro_f1},
+     "counts":  name -> DataFrame der absoluten Zaehlwerte}
+
 Die Vorhersagen werden als CSV im Cache abgelegt. Nach einem Kernel-
 Neustart laufen die Plotfunktionen damit ganz ohne Phase A/B/C.
 """
@@ -13,7 +20,6 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -24,70 +30,68 @@ from ..core import LABELS, default_estimator
 from ..plotting import counts_frame, draw_confusion, normalize_rows
 from ..plotting import plot_grid as grid
 from ..plotting import print_top_confusions
+from .pipeline import common_runs, matrices
 
 
-@dataclass
-class ConfusionResults:
-    """Matrizen, absolute Zaehlwerte und die zugrunde liegenden Vorhersagen."""
-    order: list                  # Konfigurationsnamen in Notebook-Reihenfolge
-    pred: pd.DataFrame           # Konfiguration, run_id, y_true, y_pred
-    results: dict                # name -> cm, cm_norm, n_test, bal_acc, macro_f1
-    counts: dict                 # name -> DataFrame der absoluten Zaehlwerte
-
-    @property
-    def names(self) -> list:
-        """Konfigurationen mit Matrix, in Notebook-Reihenfolge."""
-        return [n for n in self.order if n in self.results]
-
-    def best(self) -> str:
-        return max(self.results, key=lambda n: self.results[n]["macro_f1"])
-
-    def recall_table(self) -> pd.DataFrame:
-        """Die Diagonalen aller Matrizen in einer Tabelle: zeigt, WELCHE
-        Faults eine Projektion traegt und welche sie verliert. Der
-        Skalarvergleich (Macro-F1) sagt das nicht - zwei Konfigurationen mit
-        gleichem Mittel koennen an voellig verschiedenen Klassen scheitern.
-        """
-        tab = pd.DataFrame(
-            {n: np.diag(self.results[n]["cm_norm"]) for n in self.names},
-            index=LABELS).T
-        tab.index.name = "Konfiguration"
-        tab.columns.name = "faultNumber"
-        return tab
+def names(cm: dict) -> list:
+    """Konfigurationen mit Matrix, in Notebook-Reihenfolge."""
+    return [n for n in cm["order"] if n in cm["results"]]
 
 
-def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
+def best(cm: dict) -> str:
+    """Die Konfiguration mit dem hoechsten Macro-F1."""
+    return max(cm["results"], key=lambda n: cm["results"][n]["macro_f1"])
+
+
+def recall_table(cm: dict) -> pd.DataFrame:
+    """Die Diagonalen aller Matrizen in einer Tabelle: zeigt, WELCHE
+    Faults eine Projektion traegt und welche sie verliert. Der
+    Skalarvergleich (Macro-F1) sagt das nicht - zwei Konfigurationen mit
+    gleichem Mittel koennen an voellig verschiedenen Klassen scheitern.
+    """
+    tab = pd.DataFrame(
+        {n: np.diag(cm["results"][n]["cm_norm"]) for n in names(cm)},
+        index=LABELS).T
+    tab.index.name = "Konfiguration"
+    tab.columns.name = "faultNumber"
+    return tab
+
+
+def confusion(config_names: list, pred_path: str, train_top: dict | None =
+              None, test_top: dict | None = None, *, refit: bool = False,
+              estimator=None, random_state: int = 42,
+              summary_path: str | None = None) -> dict:
     """Vorhersagen holen (Cache oder Neuberechnung) und Matrizen bauen.
 
     refit=False nutzt den Vorhersage-Cache, falls vorhanden. refit=True
-    ignoriert ihn und fittet neu - noetig, wenn estimator gewechselt wird.
+    ignoriert ihn und fittet neu - noetig, wenn estimator gewechselt wird;
+    dann werden train_top und test_top gebraucht.
     """
-    cfg = pipe.cfg
-    order = list(pipe.names)
-    path = cfg.cm_pred_path
+    order = list(config_names)
 
-    if os.path.exists(path) and not refit:
-        pred = pd.read_csv(path)
-        print(f"Vorhersagen aus {path} geladen "
+    if os.path.exists(pred_path) and not refit:
+        pred = pd.read_csv(pred_path)
+        print(f"Vorhersagen aus {pred_path} geladen "
               f"({pred['Konfiguration'].nunique()} Konfigurationen, "
               f"{len(pred)} Zeilen). refit=True erzwingt Neuberechnung.")
     else:
-        if not pipe.train_top or not pipe.test_top:
+        if not train_top or not test_top:
             raise RuntimeError(
                 "train_top/test_top fehlen und es gibt keinen Vorhersage-"
-                "Cache -> zuerst Phase A und B ausfuehren (laufen aus dem "
-                "Chunk-Cache).")
-        idx_tr, idx_te = pipe.common_runs()
+                "Cache -> zuerst phase_a() und phase_b() ausfuehren (laufen "
+                "aus dem Chunk-Cache).")
+        idx_tr, idx_te = common_runs(train_top, test_top)
         print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
 
         parts = []
         for name in order:
             t0 = time.perf_counter()
-            Xtr_v, Xte_v, ytr, yte, te_index = pipe.matrices(name)
+            Xtr_v, Xte_v, ytr, yte, te_index = matrices(name, train_top,
+                                                        test_top)
 
             # Fit auf dem GANZEN Trainingssatz, danach genau EINE Auswertung
             # auf dem echten Testset.
-            model = (default_estimator(cfg.random_state) if estimator is None
+            model = (default_estimator(random_state) if estimator is None
                      else estimator)
             model.fit(Xtr_v, ytr)
             y_pred = model.predict(Xte_v)
@@ -102,10 +106,10 @@ def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
                   f"({time.perf_counter() - t0:.0f} s)")
 
         pred = pd.concat(parts, ignore_index=True)
-        pred.to_csv(path, index=False)
-        print(f"\nVorhersagen gespeichert: {path}")
+        pred.to_csv(pred_path, index=False)
+        print(f"\nVorhersagen gespeichert: {pred_path}")
 
-    # --- Matrizen aufbauen ---------------------------------------------
+    # --- Matrizen aufbauen -------------------------------------------
     # LABELS erzwingt die Reihenfolge 0..20 auch fuer Klassen, die nie
     # vorhergesagt werden -> alle Matrizen sind deckungsgleich.
     results, counts = {}, {}
@@ -116,9 +120,8 @@ def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
         cm = confusion_matrix(g["y_true"], g["y_pred"], labels=LABELS)
         # Zeilenweise normiert: Zelle (i,j) = Anteil der wahren Klasse i, der
         # als j vorhergesagt wurde; Diagonale = Recall.
-        cm_norm = normalize_rows(cm)
         results[name] = {
-            "cm": cm, "cm_norm": cm_norm, "n_test": len(g),
+            "cm": cm, "cm_norm": normalize_rows(cm), "n_test": len(g),
             "bal_acc": balanced_accuracy_score(g["y_true"], g["y_pred"]),
             "macro_f1": f1_score(g["y_true"], g["y_pred"], average="macro",
                                  zero_division=0),
@@ -128,8 +131,8 @@ def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
     # Abgleich mit Phase C: dieser RF muss die RandomForest-Zeile aus summary
     # reproduzieren. Kleine Abweichungen sind normal (RF-Zufallskomponente,
     # lazypredict haengt zusaetzlich einen SimpleImputer vor den Scaler).
-    if os.path.exists(cfg.summary_path):
-        rf = pd.read_csv(cfg.summary_path)
+    if summary_path and os.path.exists(summary_path):
+        rf = pd.read_csv(summary_path)
         rf = rf[rf["Modell"] == "RandomForestClassifier"] \
             .set_index("Konfiguration")
         d = {n: abs(results[n]["macro_f1"] - rf.loc[n, "MacroF1"])
@@ -141,35 +144,36 @@ def confusion(pipe, refit: bool = False, estimator=None) -> ConfusionResults:
 
     if not results:
         raise RuntimeError(
-            f"Keine Matrix berechenbar: {path} enthaelt keine Zeile zu den "
-            f"Konfigurationen {order}. Passt der Vorhersage-Cache noch zur "
-            f"Konfiguration? refit=True rechnet ihn neu.")
+            f"Keine Matrix berechenbar: {pred_path} enthaelt keine Zeile zu "
+            f"den Konfigurationen {order}. Passt der Vorhersage-Cache noch "
+            f"zur Konfiguration? refit=True rechnet ihn neu.")
 
-    res = ConfusionResults(order=order, pred=pred, results=results,
-                           counts=counts)
+    cm_res = {"order": order, "pred": pred, "results": results,
+              "counts": counts}
     print(f"\n{len(results)} Matrizen berechnet. Absolute Zaehlwerte stehen "
-          f"in .counts, z.B. cm.counts['{res.names[0]}'].")
-    return res
+          f"unter 'counts', z.B. cm['counts']['{names(cm_res)[0]}'].")
+    return cm_res
 
 
-def plot_grid(cm: ConfusionResults, cfg, ncols: int = 4):
+def plot_grid(cm: dict, top_k: int = 100, ncols: int = 4):
     """Alle Matrizen im Raster, zeilenweise normiert (Diagonale = Recall),
     gemeinsame Farbskala 0..1 fuer direkte Vergleichbarkeit.
 
     Die Zellen werden hier NICHT beschriftet - bei vielen 21x21-Panels waere
-    die Schrift unlesbar. Exakte Zahlen: cm.counts[name] oder plot_detail().
+    die Schrift unlesbar. Exakte Zahlen: cm["counts"][name] oder plot_detail().
     """
     return grid(
-        [cm.results[n]["cm_norm"] for n in cm.names],
-        [f"{n}\nMacro-F1 {cm.results[n]['macro_f1']:.3f} | "
-         f"BA {cm.results[n]['bal_acc']:.3f}" for n in cm.names],
+        [cm["results"][n]["cm_norm"] for n in names(cm)],
+        [f"{n}\nMacro-F1 {cm['results'][n]['macro_f1']:.3f} | "
+         f"BA {cm['results'][n]['bal_acc']:.3f}" for n in names(cm)],
         "RandomForestClassifier - Confusion-Matrizen je Konfiguration "
-        f"(Testset, Top-{cfg.top_k} Features)",
+        f"(Testset, Top-{top_k} Features)",
         ncols=ncols)
 
 
-def plot_detail(cm: ConfusionResults, focus: str | None = None,
-                annot_min: float = 0.05, top_n: int = 8, report: bool = True):
+def plot_detail(cm: dict, focus: str | None = None,
+                annot_min: float = 0.05, top_n: int = 8,
+                report: bool = True):
     """Eine Konfiguration gross, mit beschrifteten auffaelligen Zellen.
 
     focus=None waehlt die beste nach Macro-F1. annot_min ist die Schwelle,
@@ -179,9 +183,9 @@ def plot_detail(cm: ConfusionResults, focus: str | None = None,
     """
     import matplotlib.pyplot as plt
 
-    focus = focus or cm.best()
-    res = cm.results[focus]
-    g = cm.pred[cm.pred["Konfiguration"] == focus]
+    focus = focus or best(cm)
+    res = cm["results"][focus]
+    g = cm["pred"][cm["pred"]["Konfiguration"] == focus]
 
     # figsize: imshow erzwingt ein quadratisches Panel - die Hoehe ist also
     # Breite minus Colorbar/Beschriftung, plus der zweizeilige Titel. Wird
@@ -215,11 +219,11 @@ def plot_detail(cm: ConfusionResults, focus: str | None = None,
     return fig, focus
 
 
-def plot_recall(cm: ConfusionResults, n_worst: int = 5):
+def plot_recall(cm: dict, n_worst: int = 5):
     """Recall je Fault-Klasse und Konfiguration als Heatmap."""
     import matplotlib.pyplot as plt
 
-    tab = cm.recall_table()
+    tab = recall_table(cm)
     fig, ax = plt.subplots(figsize=(13, 0.42 * len(tab) + 1.8),
                            constrained_layout=True)
     # aspect="auto": die Tabelle ist breit und flach, quadratische Zellen

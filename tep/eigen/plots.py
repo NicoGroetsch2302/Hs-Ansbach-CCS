@@ -10,13 +10,16 @@ Fehlerklasse:
 
 Fuer skalare Verfahren (LDA) gibt es stattdessen `plot_scalar`, das
 Mittelwert, Streuung und CV ueber die Fehlerklassen zeigt.
+
+Alle nehmen `method` (fuer Praefix und Titel) und ihre Darstellungs-
+parameter direkt entgegen.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from .config import SpectrumConfig
+from .spectra import get
 
 
 def transform(vals, mode: str = "log"):
@@ -45,19 +48,18 @@ def transform(vals, mode: str = "log"):
     raise ValueError(f"Unbekannter mode: {mode!r}")
 
 
-def _stat_cols(cfg, agg_df, stat: str) -> list:
+def _stat_cols(agg_df, method: str, stat: str, k_max: int) -> list:
     """Die `_mean`- bzw. `_std`-Spalten, nach Komponentenindex sortiert
-    und auf cfg.k_max begrenzt."""
-    prefix = cfg.prefix
+    und auf k_max begrenzt."""
+    pre = get(method)["prefix"]
     cols = [c for c in agg_df.columns
-            if c.startswith(prefix) and c.endswith(f"_{stat}")]
-    cols = sorted(cols, key=lambda c: int(c[len(prefix):].split("_")[0]))
-    return cols[:cfg.k_max]
+            if c.startswith(pre) and c.endswith(f"_{stat}")]
+    cols = sorted(cols, key=lambda c: int(c[len(pre):].split("_")[0]))
+    return cols[:k_max]
 
 
-def _grid(cfg, n_faults):
+def _grid(n_faults: int, ncols: int):
     import matplotlib.pyplot as plt
-    ncols = cfg.ncols
     nrows = int(np.ceil(n_faults / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(3.5 * ncols, 3.0 * nrows),
                              sharex=True, sharey=True)
@@ -76,10 +78,10 @@ def _finish(fig, axes, n_used, title, xlabel, ylabel):
     return fig
 
 
-def _lines(cfg, agg_df, values_of, color, title, ylabel):
+def _lines(agg_df, method, values_of, color, title, ylabel, ncols):
     """Gemeinsames Geruest der drei Linienplots."""
     faults = np.sort(agg_df["faultNumber"].unique())
-    fig, axes = _grid(cfg, len(faults))
+    fig, axes = _grid(len(faults), ncols)
     K = None
     for i, fault in enumerate(faults):
         row = agg_df[agg_df["faultNumber"] == fault].iloc[0]
@@ -89,7 +91,7 @@ def _lines(cfg, agg_df, values_of, color, title, ylabel):
         axes[i].set_title(f"Fault {fault}", fontsize=9)
         axes[i].grid(True, alpha=0.3)
     return _finish(fig, axes, len(faults), title.format(K=K),
-                   f"{cfg.label}-Komponenten-Index", ylabel)
+                   f"{get(method)['label']}-Komponenten-Index", ylabel)
 
 
 def _ylabel(mode, base, first):
@@ -100,74 +102,80 @@ def _ylabel(mode, base, first):
     return base
 
 
-def plot_means(cfg: SpectrumConfig, agg_df):
+def plot_means(agg_df, method: str, k_max: int = 10,
+               plot_mode: str = "linear", ncols: int = 6):
     """Mittleres Spektrum je Fehlerklasse."""
-    cols = _stat_cols(cfg, agg_df, "mean")
+    lab = get(method)["label"]
+    cols = _stat_cols(agg_df, method, "mean", k_max)
     return _lines(
-        cfg, agg_df,
-        lambda row: transform([row[c] for c in cols], cfg.plot_mode),
+        agg_df, method,
+        lambda row: transform([row[c] for c in cols], plot_mode),
         "tab:blue",
-        f"Mittlere {cfg.label}-Werte pro Komponente fuer alle Fehlerklassen "
-        f"({cfg.plot_mode}-Skala, erste {{K}} Komponenten)",
-        _ylabel(cfg.plot_mode, "Mittlerer Wert", "Mittelwert"))
+        f"Mittlere {lab}-Werte pro Komponente fuer alle Fehlerklassen "
+        f"({plot_mode}-Skala, erste {{K}} Komponenten)",
+        _ylabel(plot_mode, "Mittlerer Wert", "Mittelwert"), ncols)
 
 
-def plot_stds(cfg: SpectrumConfig, agg_df):
+def plot_stds(agg_df, method: str, k_max: int = 10,
+              plot_mode: str = "linear", ncols: int = 6):
     """Standardabweichung je Komponente und Fehlerklasse.
 
     Struktur identisch zum Mittelwertsplot - eine breite Streuung heisst,
     dass die Komponente ueber die 500 Runs der Klasse nicht stabil ist.
     """
-    cols = _stat_cols(cfg, agg_df, "std")
+    lab = get(method)["label"]
+    cols = _stat_cols(agg_df, method, "std", k_max)
     return _lines(
-        cfg, agg_df,
-        lambda row: transform([row[c] for c in cols], cfg.plot_mode),
+        agg_df, method,
+        lambda row: transform([row[c] for c in cols], plot_mode),
         "tab:orange",
-        f"Standardabweichung der {cfg.label}-Werte pro Komponente fuer alle "
-        f"Fehlerklassen ({cfg.plot_mode}-Skala, erste {{K}} Komponenten)",
-        _ylabel(cfg.plot_mode, "Std der Werte", "Std"))
+        f"Standardabweichung der {lab}-Werte pro Komponente fuer alle "
+        f"Fehlerklassen ({plot_mode}-Skala, erste {{K}} Komponenten)",
+        _ylabel(plot_mode, "Std der Werte", "Std"), ncols)
 
 
-def plot_cv(cfg: SpectrumConfig, agg_df):
+def plot_cv(agg_df, method: str, k_max: int = 10,
+            plot_mode: str = "linear", ncols: int = 6):
     """Variationskoeffizient CV = Std / Mittelwert.
 
     Die dimensionslose Streuung: sie macht Komponenten vergleichbar, deren
     Absolutniveau um Groessenordnungen auseinanderliegt.
     """
-    mean_cols = _stat_cols(cfg, agg_df, "mean")
-    std_cols = _stat_cols(cfg, agg_df, "std")
+    lab = get(method)["label"]
+    mean_cols = _stat_cols(agg_df, method, "mean", k_max)
+    std_cols = _stat_cols(agg_df, method, "std", k_max)
 
     def values_of(row):
         m = np.array([row[c] for c in mean_cols], dtype=float)
         s = np.array([row[c] for c in std_cols], dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
             cv = np.where(m > 0, s / m, np.nan)
-        return transform(cv, cfg.plot_mode_cv)
+        return transform(cv, plot_mode)
 
     return _lines(
-        cfg, agg_df, values_of, "tab:green",
-        f"Relative Streuung der {cfg.label}-Werte pro Komponente fuer alle "
-        f"Fehlerklassen ({cfg.plot_mode_cv}-Skala, erste {{K}} Komponenten)",
-        _ylabel(cfg.plot_mode_cv, "Variationskoeffizient (Std / Mittelwert)",
-                "CV"))
+        agg_df, method, values_of, "tab:green",
+        f"Relative Streuung der {lab}-Werte pro Komponente fuer alle "
+        f"Fehlerklassen ({plot_mode}-Skala, erste {{K}} Komponenten)",
+        _ylabel(plot_mode, "Variationskoeffizient (Std / Mittelwert)", "CV"),
+        ncols)
 
 
-def plot_bars(cfg: SpectrumConfig, agg_df):
+def plot_bars(agg_df, method: str, k_bar: int = 10, ncols: int = 6):
     """Erste k Werte je Fehlerklasse als Balken, mit Fault-0-Referenz.
 
     Der schmale orange Balken ist Fault 0 - so ist auf einen Blick zu
     sehen, welche Komponenten sich unter dem Fehler wirklich verschieben.
     Die Fehlerbalken zeigen die Standardabweichung ueber die Runs.
     """
-    k = cfg.k_bar
-    mean_cols = [f"{cfg.prefix}{i}_mean" for i in range(1, k + 1)]
-    std_cols = [f"{cfg.prefix}{i}_std" for i in range(1, k + 1)]
+    lab, pre = get(method)["label"], get(method)["prefix"]
+    mean_cols = [f"{pre}{i}_mean" for i in range(1, k_bar + 1)]
+    std_cols = [f"{pre}{i}_std" for i in range(1, k_bar + 1)]
     faults = np.sort(agg_df["faultNumber"].unique())
     ref = agg_df[agg_df["faultNumber"] == 0].iloc[0][mean_cols] \
         .values.astype(float)
-    x = np.arange(1, k + 1)
+    x = np.arange(1, k_bar + 1)
 
-    fig, axes = _grid(cfg, len(faults))
+    fig, axes = _grid(len(faults), ncols)
     for i, fault in enumerate(faults):
         ax = axes[i]
         row = agg_df[agg_df["faultNumber"] == fault].iloc[0]
@@ -185,33 +193,32 @@ def plot_bars(cfg: SpectrumConfig, agg_df):
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper right", ncol=2, fontsize=10)
     return _finish(fig, axes, len(faults),
-                   f"Mittlere {cfg.label}-Werte je Fault mit Fault-0-Referenz "
-                   f"(orange) - erste {k} Komponenten",
-                   f"{cfg.label}-Komponenten-Index",
-                   "Mittlerer Wert (+/- Std)")
+                   f"Mittlere {lab}-Werte je Fault mit Fault-0-Referenz "
+                   f"(orange) - erste {k_bar} Komponenten",
+                   f"{lab}-Komponenten-Index", "Mittlerer Wert (+/- Std)")
 
 
 # =========================================================================
 # Skalare Verfahren (LDA)
 # =========================================================================
 
-def plot_scalar(cfg: SpectrumConfig, agg_df):
+def plot_scalar(agg_df, method: str = "lda"):
     """Drei Ansichten fuer ein Verfahren mit EINER Kennzahl je Run:
     Mittelwert je Fehlerklasse, Mittelwert neben Streuung, und der
     Variationskoeffizient."""
     import matplotlib.pyplot as plt
 
-    mean_col, std_col = f"{cfg.prefix}_mean", f"{cfg.prefix}_std"
+    lab, pre = get(method)["label"], get(method)["prefix"]
     faults = agg_df["faultNumber"].to_numpy()
-    means = agg_df[mean_col].to_numpy(dtype=float)
-    stds = agg_df[std_col].to_numpy(dtype=float)
+    means = agg_df[f"{pre}_mean"].to_numpy(dtype=float)
+    stds = agg_df[f"{pre}_std"].to_numpy(dtype=float)
 
     fig1, ax = plt.subplots(figsize=(13, 4.2), constrained_layout=True)
     ax.bar(faults, means, yerr=stds, capsize=3, color="C0", alpha=0.85)
     ax.set_xticks(faults)
     ax.set_xlabel("Fehlerklasse")
-    ax.set_ylabel(f"Mittlerer {cfg.label}-Eigenwert (+/- Std)")
-    ax.set_title(f"{cfg.label}: Separierbarkeit gegen Normalbetrieb "
+    ax.set_ylabel(f"Mittlerer {lab}-Eigenwert (+/- Std)")
+    ax.set_title(f"{lab}: Separierbarkeit gegen Normalbetrieb "
                  f"je Fehlerklasse")
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_axisbelow(True)
@@ -227,7 +234,7 @@ def plot_scalar(cfg: SpectrumConfig, agg_df):
         a.set_xlabel("Fehlerklasse")
         a.grid(True, axis="y", alpha=0.3)
         a.set_axisbelow(True)
-    fig2.suptitle(f"{cfg.label}-Eigenwert: Niveau und Streuung im Vergleich")
+    fig2.suptitle(f"{lab}-Eigenwert: Niveau und Streuung im Vergleich")
     plt.show()
 
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -237,7 +244,7 @@ def plot_scalar(cfg: SpectrumConfig, agg_df):
     ax.set_xticks(faults)
     ax.set_xlabel("Fehlerklasse")
     ax.set_ylabel("CV = Std / Mittelwert")
-    ax.set_title(f"{cfg.label}-Eigenwert: relative Streuung je Fehlerklasse")
+    ax.set_title(f"{lab}-Eigenwert: relative Streuung je Fehlerklasse")
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_axisbelow(True)
     plt.show()
@@ -248,7 +255,8 @@ def plot_scalar(cfg: SpectrumConfig, agg_df):
 # DyCA: m und n schaetzen
 # =========================================================================
 
-def plot_dyca_mn_estimate(cfg: SpectrumConfig, df_ff, scaler=None,
+def plot_dyca_mn_estimate(df_ff, scaling_mode: str = "global_mean",
+                          scaler=None, dyca_m: int = 2, dyca_n: int = 4,
                           ref_run: int = 1):
     """Zwei Diagnoseplots zur Wahl von m und n auf einem FaultFree-Run.
 
@@ -266,7 +274,7 @@ def plot_dyca_mn_estimate(cfg: SpectrumConfig, df_ff, scaler=None,
     from ..core import PROC_COLS, scale
 
     ref = df_ff[df_ff["simulationRun"] == ref_run].sort_values("sample")
-    X = scale(ref[PROC_COLS].values, cfg.scaling_mode, scaler)
+    X = scale(ref[PROC_COLS].values, scaling_mode, scaler)
     print("Referenz-Run shape:", X.shape)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
@@ -280,9 +288,9 @@ def plot_dyca_mn_estimate(cfg: SpectrumConfig, df_ff, scaler=None,
     axes[0].axhline(1.0, color="grey", linestyle="--", linewidth=0.8)
     axes[0].grid(True, alpha=0.3)
 
-    sv = np.asarray(dyca(X, m=cfg.dyca_m)["singular_values"], dtype=float)
+    sv = np.asarray(dyca(X, m=dyca_m)["singular_values"], dtype=float)
     axes[1].bar(range(1, len(sv) + 1), sv, color="tab:orange")
-    axes[1].set_title(f"Schritt 2: Singulaerwerte (mit m = {cfg.dyca_m})\n"
+    axes[1].set_title(f"Schritt 2: Singulaerwerte (mit m = {dyca_m})\n"
                       "-> (n - m) = Anzahl Werte deutlich > 0")
     axes[1].set_xlabel("Komponente")
     axes[1].set_ylabel("singular value")
@@ -290,8 +298,7 @@ def plot_dyca_mn_estimate(cfg: SpectrumConfig, df_ff, scaler=None,
     plt.tight_layout()
     plt.show()
 
-    print(f"\nAktuelle Einstellung: dyca_m = {cfg.dyca_m}, "
-          f"dyca_n = {cfg.dyca_n}")
+    print(f"\nAktuelle Einstellung: dyca_m = {dyca_m}, dyca_n = {dyca_n}")
     print("Legen die Plots eine andere Wahl nahe, in der Konfigurations-"
           "zelle aendern und neu ausfuehren.")
     return fig

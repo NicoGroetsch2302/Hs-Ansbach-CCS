@@ -1,12 +1,19 @@
-"""Die drei Phasen des Laufs, gebuendelt in einer Pipeline-Klasse.
+"""Die drei Phasen des Laufs, jede als eigene Funktion.
 
-    Phase A  Trainingsruns extrahieren -> Top-K auswaehlen -> reduzieren
-    Phase B  Testruns extrahieren, aber NUR die in A ausgewaehlten Features
-    Phase C  LazyClassifier je Konfiguration, Ergebnis als summary-CSV
+    phase_a  Trainingsruns extrahieren -> Top-K auswaehlen -> reduzieren
+    phase_b  Testruns extrahieren, aber NUR die in A ausgewaehlten Features
+    phase_c  LazyClassifier je Konfiguration, Ergebnis als summary-CSV
 
-Das Objekt haelt den Zustand (train_top, top_names, test_top, summary), den
-die Auswertungszellen brauchen. Nach einem Kernel-Neustart genuegt fuer die
-Auswertung load_summary() bzw. der Vorhersage-Cache der Confusion-Matrizen.
+Jede Phase nimmt entgegen, was sie braucht, und gibt zurueck, was die
+naechste braucht - kein gemeinsames Objekt, das den Zustand haelt:
+
+    names = validate(CONFIGS)
+    train_top, top_names = phase_a(CONFIGS, CACHE, data_dir=..., ...)
+    test_top = phase_b(CONFIGS, CACHE, top_names, data_dir=..., ...)
+    summary = phase_c(CONFIGS, train_top, test_top, summary_path)
+
+Nach einem Kernel-Neustart genuegt fuer die Auswertung die summary-CSV
+(`load_summary`) bzw. der Vorhersage-Cache der Confusion-Matrizen.
 """
 
 from __future__ import annotations
@@ -21,239 +28,231 @@ from lazypredict.Supervised import LazyClassifier
 from sklearn.metrics import balanced_accuracy_score, f1_score
 from tsfresh.feature_extraction.settings import from_columns
 
-from ..core import fit_scaler
-from .config import PipelineConfig
-from .data import labels_from_index, load_runs
-from .features import (extract_config, load_top_names, rank_features,
-                       save_top_names)
-from .projections import config_name, get, n_channels
+from ..core import labels_from_index
+from .data import load_runs
+from .features import (extract_config, fc_parameters, load_top_names,
+                       rank_features, save_top_names)
+from .projections import config_name, n_channels, validate
 
 
-class Pipeline:
-    """Fuehrt einen kompletten TSFresh-Lauf fuer cfg.configs aus."""
+def describe(configs, cache: str, *, fc_mode: str = "efficient",
+             top_k: int = 100, scaling_mode: str = "global_mean",
+             runs_per_fault: int | None = None,
+             smoke_test: bool = False) -> None:
+    """Umfang des Laufs und Kanalzahl je Konfiguration im Klartext."""
+    n_calc = len(fc_parameters(fc_mode))
+    print(f"smoke_test={smoke_test} | fc_mode={fc_mode} "
+          f"({n_calc} Calculator) | top_k={top_k} "
+          f"| scaling_mode={scaling_mode}")
+    print(f"Runs je Fault: {runs_per_fault or 'alle'} | "
+          f"Cache: {cache}/ (geteilt mit den Schwester-Notebooks)")
+    print(f"\n{len(configs)} Konfigurationen:")
+    for spec in configs:
+        c = n_channels(spec)
+        print(f"  {config_name(spec):22s} {c:3d} Kanaele -> "
+              f"~{c * n_calc} Features/Run (Groessenordnung)")
+    if not smoke_test:
+        print("\n!!! VOLLER LAUF - Stunden bis Nacht. Der Chunk-Cache "
+              "macht Abbrechen und Fortsetzen gefahrlos. !!!")
 
-    def __init__(self, cfg: PipelineConfig, verbose: bool = True):
-        self.cfg = cfg
-        for spec in cfg.configs:
-            proj = get(spec)                       # wirft bei unbekannter Art
-            if proj.validate is not None:
-                proj.validate(spec)
-        self.names = [config_name(s) for s in cfg.configs]
-        if len(set(self.names)) != len(self.names):
-            raise ValueError(f"Doppelte Konfigurationsnamen: {self.names}")
 
-        # Nur bei scaling_mode="scaler" - sonst bleiben die 250k Zeilen
-        # Normalbetrieb ungelesen.
-        self.scaler = (
-            fit_scaler(cfg.data_path("TEP_FaultFree_Training.csv"), verbose)
-            if cfg.scaling_mode == "scaler" else None)
-        self.train_top: dict = {}
-        self.top_names: dict = {}
-        self.test_top: dict = {}
-        self.leaderboards: dict = {}
-        self.summary: pd.DataFrame | None = None
+# =========================================================================
+# Phase A
+# =========================================================================
 
-    # -- Bequemlichkeit -------------------------------------------------
-    def __iter__(self):
-        """Laeuft ueber (spec, name)-Paare."""
-        return zip(self.cfg.configs, self.names)
+def phase_a(configs, cache: str, *, data_dir: str = ".",
+            runs_per_fault: int | None = None, run_length: int | None = 480,
+            fc_mode: str = "efficient", top_k: int = 100,
+            chunk_runs: int = 250, block_cols: int = 4000,
+            n_jobs: int | None = None, scaling_mode: str = "global_mean",
+            scaler=None, fix_signs: bool = True, **proj_params):
+    """Train extrahieren, Features auswaehlen, auf Top-K reduzieren.
 
-    def describe(self) -> None:
-        """Die Kopfzeilen, die frueher am Ende der Konfigurationszelle
-        standen: Umfang des Laufs und Kanalzahl je Konfiguration."""
-        cfg = self.cfg
-        print(f"smoke_test={cfg.smoke_test} | fc_mode={cfg.fc_mode} "
-              f"({len(cfg.fc_parameters)} Calculator) | top_k={cfg.top_k} "
-              f"| scaling_mode={cfg.scaling_mode}")
-        print(f"Runs je Fault: {cfg.runs_per_fault or 'alle'} | "
-              f"Cache: {cfg.cache_dir}/ (geteilt mit den Schwester-Notebooks)")
-        print(f"\n{len(cfg.configs)} Konfigurationen:")
-        for spec, name in self:
-            c = n_channels(spec)
-            print(f"  {name:22s} {c:3d} Kanaele -> "
-                  f"~{c * len(cfg.fc_parameters)} Features/Run "
-                  f"(Groessenordnung)")
-        if not cfg.smoke_test:
-            print("\n!!! VOLLER LAUF - Stunden bis Nacht. Der Chunk-Cache "
-                  "macht Abbrechen und Fortsetzen gefahrlos. !!!")
+    Konfigurationen strikt nacheinander: die volle Matrix einer
+    Konfiguration wird freigegeben, bevor die naechste beginnt.
 
-    # -- Phase A --------------------------------------------------------
-    def run_phase_a(self) -> None:
-        """Train extrahieren, Features auswaehlen, auf Top-K reduzieren.
+    Rueckgabe: (train_top, top_names), beide dict name -> DataFrame/Liste.
+    """
+    t_start = time.perf_counter()
+    fc_params = fc_parameters(fc_mode)
 
-        Konfigurationen strikt nacheinander: die volle Matrix einer
-        Konfiguration wird freigegeben, bevor die naechste beginnt.
-        """
-        cfg = self.cfg
-        t_start = time.perf_counter()
+    print("Lade Trainingsruns ...")
+    runs_train = load_runs("train", data_dir, runs_per_fault, run_length)
 
-        print("Lade Trainingsruns ...")
-        runs_train = load_runs(cfg, "train")
+    train_top, top_names = {}, {}
+    for spec in configs:
+        name = config_name(spec)
+        t0 = time.perf_counter()
+        names = load_top_names(cache, spec, top_k)
 
-        for spec, name in self:
-            t0 = time.perf_counter()
-            names = load_top_names(cfg, spec)
+        common = dict(cache=cache, tag="full", fc_params=fc_params,
+                      chunk_runs=chunk_runs, n_jobs=n_jobs,
+                      scaling_mode=scaling_mode, scaler=scaler,
+                      fix_signs=fix_signs, **proj_params)
 
-            if names is not None:
-                # Auswahl liegt vor -> nur die Top-K-Spalten aus dem Cache.
-                Xtop = extract_config(cfg, spec, "train", runs_train,
-                                      tag="full", usecols=names,
-                                      scaler=self.scaler)
-                print(f"[{name}] Auswahl aus Cache, {Xtop.shape[0]} Runs")
-            else:
-                X_full = extract_config(cfg, spec, "train", runs_train,
-                                        tag="full", scaler=self.scaler)
-                y_full = labels_from_index(X_full.index)
-                print(f"[{name}] extrahiert: {X_full.shape[0]} Runs x "
-                      f"{X_full.shape[1]} Features "
-                      f"({time.perf_counter() - t0:.0f} s) -> selektiere ...")
+        if names is not None:
+            # Auswahl liegt vor -> nur die Top-K-Spalten aus dem Cache.
+            Xtop = extract_config(spec, "train", runs_train, usecols=names,
+                                  **common)
+            print(f"[{name}] Auswahl aus Cache, {Xtop.shape[0]} Runs")
+        else:
+            X_full = extract_config(spec, "train", runs_train, **common)
+            y_full = labels_from_index(X_full.index)
+            print(f"[{name}] extrahiert: {X_full.shape[0]} Runs x "
+                  f"{X_full.shape[1]} Features "
+                  f"({time.perf_counter() - t0:.0f} s) -> selektiere ...")
 
-                rank = rank_features(cfg, X_full, y_full)
-                names = rank["feature"].head(cfg.top_k).tolist()
-                save_top_names(cfg, spec, names)
+            rank = rank_features(X_full, y_full, block_cols, n_jobs)
+            names = rank["feature"].head(top_k).tolist()
+            save_top_names(cache, spec, top_k, names)
 
-                Xtop = X_full[names].copy()
-                del X_full
-                gc.collect()
+            Xtop = X_full[names].copy()
+            del X_full
+            gc.collect()
 
-            self.train_top[name] = Xtop
-            self.top_names[name] = names
-            print(f"[{name}] fertig: {Xtop.shape} in "
-                  f"{(time.perf_counter() - t0) / 60:.1f} min")
+        train_top[name] = Xtop
+        top_names[name] = names
+        print(f"[{name}] fertig: {Xtop.shape} in "
+              f"{(time.perf_counter() - t0) / 60:.1f} min")
 
-        del runs_train
-        gc.collect()
-        print(f"\nPhase A komplett in "
-              f"{(time.perf_counter() - t_start) / 60:.1f} min")
+    del runs_train
+    gc.collect()
+    print(f"\nPhase A komplett in "
+          f"{(time.perf_counter() - t_start) / 60:.1f} min")
+    return train_top, top_names
 
-    # -- Phase B --------------------------------------------------------
-    def run_phase_b(self) -> None:
-        """Testset extrahieren - nur die in Phase A ausgewaehlten Features."""
-        cfg = self.cfg
-        if not self.top_names:
-            raise RuntimeError("Phase B braucht die Auswahl aus Phase A -> "
-                               "zuerst run_phase_a() (laeuft aus dem Cache).")
 
-        print("Lade Testruns ...")
-        runs_test = load_runs(cfg, "test")
+# =========================================================================
+# Phase B
+# =========================================================================
 
-        for spec, name in self:
-            t0 = time.perf_counter()
-            kind_to_fc = from_columns(self.top_names[name])
-            # top_k MUSS in der Cache-Kennung stehen: die Chunks enthalten
-            # genau die in Phase A ausgewaehlten Features. Ohne top_k im
-            # Namen wuerde ein spaeterer Lauf mit groesserem top_k die alten
-            # Chunks wiederverwenden und die fehlenden Spalten stumm mit 0.0
-            # auffuellen (siehe _subset in features.py).
-            Xte = extract_config(cfg, spec, "test", runs_test,
-                                 tag=f"top{cfg.top_k}",
-                                 kind_to_fc=kind_to_fc, scaler=self.scaler)
+def phase_b(configs, cache: str, top_names: dict, *, data_dir: str = ".",
+            runs_per_fault: int | None = None, run_length: int | None = 480,
+            top_k: int = 100, chunk_runs: int = 250,
+            n_jobs: int | None = None, scaling_mode: str = "global_mean",
+            scaler=None, fix_signs: bool = True, **proj_params) -> dict:
+    """Testset extrahieren - nur die in Phase A ausgewaehlten Features."""
+    if not top_names:
+        raise RuntimeError("Phase B braucht die Auswahl aus Phase A -> "
+                           "zuerst phase_a() (laeuft aus dem Cache).")
 
-            # Reihenfolge und Vollstaendigkeit an Train angleichen: Features,
-            # die tsfresh auf dem Testset nicht erzeugt, waeren sonst stumm
-            # verschoben.
-            missing = [c for c in self.top_names[name] if c not in Xte.columns]
-            if missing:
-                print(f"    {name}: {len(missing)} Features fehlen im Test "
-                      f"-> 0.0")
-                for c in missing:
-                    Xte[c] = 0.0
-            self.test_top[name] = Xte[self.top_names[name]]
+    print("Lade Testruns ...")
+    runs_test = load_runs("test", data_dir, runs_per_fault, run_length)
 
-            print(f"[{name}] Test fertig: {self.test_top[name].shape} in "
-                  f"{(time.perf_counter() - t0) / 60:.1f} min")
+    test_top = {}
+    for spec in configs:
+        name = config_name(spec)
+        t0 = time.perf_counter()
+        # top_k MUSS in der Cache-Kennung stehen: die Chunks enthalten
+        # genau die in Phase A ausgewaehlten Features. Ohne top_k im
+        # Namen wuerde ein spaeterer Lauf mit groesserem top_k die alten
+        # Chunks wiederverwenden und die fehlenden Spalten stumm mit 0.0
+        # auffuellen (siehe _subset in features.py).
+        Xte = extract_config(spec, "test", runs_test, cache,
+                             tag=f"top{top_k}",
+                             kind_to_fc=from_columns(top_names[name]),
+                             chunk_runs=chunk_runs, n_jobs=n_jobs,
+                             scaling_mode=scaling_mode, scaler=scaler,
+                             fix_signs=fix_signs, **proj_params)
 
-        del runs_test
-        gc.collect()
+        # Reihenfolge und Vollstaendigkeit an Train angleichen: Features,
+        # die tsfresh auf dem Testset nicht erzeugt, waeren sonst stumm
+        # verschoben.
+        missing = [c for c in top_names[name] if c not in Xte.columns]
+        if missing:
+            print(f"    {name}: {len(missing)} Features fehlen im Test "
+                  f"-> 0.0")
+            for c in missing:
+                Xte[c] = 0.0
+        test_top[name] = Xte[top_names[name]]
 
-    # -- gemeinsame Run-Menge -------------------------------------------
-    def common_runs(self):
-        """(train_index, test_index) der ueber ALLE Konfigurationen
-        gemeinsamen Runs.
+        print(f"[{name}] Test fertig: {test_top[name].shape} in "
+              f"{(time.perf_counter() - t0) / 60:.1f} min")
 
-        Die DyCA-Stufe kann an einzelnen Runs numerisch scheitern; ohne
-        diesen Schnitt waeren die Konfigurationen auf unterschiedlichen
-        Testmengen bewertet.
-        """
-        if not self.train_top or not self.test_top:
-            raise RuntimeError("train_top/test_top fehlen -> zuerst Phase A "
-                               "und B ausfuehren.")
-        tr = sorted(set.intersection(*(set(d.index)
-                                       for d in self.train_top.values())))
-        te = sorted(set.intersection(*(set(d.index)
-                                       for d in self.test_top.values())))
-        return tr, te
+    del runs_test
+    gc.collect()
+    return test_top
 
-    def matrices(self, name: str):
-        """(Xtr, Xte, ytr, yte) einer Konfiguration - gemeinsame Runs,
-        NaN/inf aufgefuellt. Genau die Datenbasis von Phase C."""
-        idx_tr, idx_te = self.common_runs()
-        Xtr = self.train_top[name].loc[idx_tr]
-        Xte = self.test_top[name].loc[idx_te]
-        ytr = labels_from_index(Xtr.index).to_numpy()
-        yte = labels_from_index(Xte.index).to_numpy()
-        # NaN/inf koennen aus Featureberechnungen stammen -> auffuellen.
-        Xtr_v = np.nan_to_num(Xtr.to_numpy(dtype=np.float64),
-                              posinf=0.0, neginf=0.0)
-        Xte_v = np.nan_to_num(Xte.to_numpy(dtype=np.float64),
-                              posinf=0.0, neginf=0.0)
-        return Xtr_v, Xte_v, ytr, yte, Xte.index
 
-    # -- Phase C --------------------------------------------------------
-    def run_phase_c(self) -> pd.DataFrame:
-        """LazyClassifier je Konfiguration; schreibt die summary-CSV."""
-        cfg = self.cfg
-        idx_tr, idx_te = self.common_runs()
-        print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
+# =========================================================================
+# Gemeinsame Run-Menge
+# =========================================================================
 
-        rows = []
-        for spec, name in self:
-            Xtr_v, Xte_v, ytr, yte, _ = self.matrices(name)
+def common_runs(train_top: dict, test_top: dict):
+    """(train_index, test_index) der ueber ALLE Konfigurationen
+    gemeinsamen Runs.
 
-            clf = LazyClassifier(verbose=0, ignore_warnings=True,
-                                 predictions=True, cv=cfg.lc_cv_folds,
-                                 random_state=cfg.random_state)
+    Die DyCA-Stufe kann an einzelnen Runs numerisch scheitern; ohne
+    diesen Schnitt waeren die Konfigurationen auf unterschiedlichen
+    Testmengen bewertet.
+    """
+    if not train_top or not test_top:
+        raise RuntimeError("train_top/test_top fehlen -> zuerst phase_a() "
+                           "und phase_b() ausfuehren.")
+    tr = sorted(set.intersection(*(set(d.index) for d in train_top.values())))
+    te = sorted(set.intersection(*(set(d.index) for d in test_top.values())))
+    return tr, te
 
-            t0 = time.perf_counter()
-            models, preds = clf.fit(Xtr_v, Xte_v, ytr, yte)
-            self.leaderboards[name] = models
 
-            rows += _summary_rows(name, models, preds, yte)
-            _print_best(name, rows, time.perf_counter() - t0)
+def matrices(name: str, train_top: dict, test_top: dict):
+    """(Xtr, Xte, ytr, yte, test_index) einer Konfiguration - gemeinsame
+    Runs, NaN/inf aufgefuellt. Genau die Datenbasis von Phase C."""
+    idx_tr, idx_te = common_runs(train_top, test_top)
+    Xtr = train_top[name].loc[idx_tr]
+    Xte = test_top[name].loc[idx_te]
+    ytr = labels_from_index(Xtr.index).to_numpy()
+    yte = labels_from_index(Xte.index).to_numpy()
+    # NaN/inf koennen aus Featureberechnungen stammen -> auffuellen.
+    Xtr_v = np.nan_to_num(Xtr.to_numpy(dtype=np.float64),
+                          posinf=0.0, neginf=0.0)
+    Xte_v = np.nan_to_num(Xte.to_numpy(dtype=np.float64),
+                          posinf=0.0, neginf=0.0)
+    return Xtr_v, Xte_v, ytr, yte, Xte.index
 
-        self.summary = pd.DataFrame(rows)
-        self.summary.to_csv(cfg.summary_path, index=False)
-        return self.summary
 
-    # -- Auswertung ------------------------------------------------------
-    # Duenne Weiterleitungen, damit im Notebook alles am Pipeline-Objekt
-    # haengt. Die Arbeit steckt in reporting.py bzw. confusion.py.
-    def compare(self, **kw):
-        from .reporting import compare
-        return compare(self, **kw)
+# =========================================================================
+# Phase C
+# =========================================================================
 
-    def plot_comparison(self, cmp, **kw):
-        from .reporting import plot_comparison
-        return plot_comparison(cmp, self.cfg, **kw)
+def phase_c(configs, train_top: dict, test_top: dict, summary_path: str,
+            *, lc_cv_folds: int = 5, random_state: int = 42):
+    """LazyClassifier je Konfiguration; schreibt die summary-CSV.
 
-    def confusion(self, **kw):
-        from .confusion import confusion
-        return confusion(self, **kw)
+    Rueckgabe: (summary, leaderboards) - die Tabelle und je Konfiguration
+    das volle lazypredict-Leaderboard.
+    """
+    idx_tr, idx_te = common_runs(train_top, test_top)
+    print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
 
-    def plot_confusions(self, cm, **kw):
-        from .confusion import plot_grid
-        return plot_grid(cm, self.cfg, **kw)
+    rows, leaderboards = [], {}
+    for spec in configs:
+        name = config_name(spec)
+        Xtr_v, Xte_v, ytr, yte, _ = matrices(name, train_top, test_top)
 
-    def load_summary(self) -> pd.DataFrame:
-        """summary aus der CSV holen - fuer Auswertungszellen nach einem
-        Kernel-Neustart."""
-        if self.summary is None:
-            if not os.path.exists(self.cfg.summary_path):
-                raise FileNotFoundError(
-                    f"{self.cfg.summary_path} fehlt -> zuerst run_phase_c().")
-            self.summary = pd.read_csv(self.cfg.summary_path)
-            print(f"summary aus {self.cfg.summary_path} geladen.")
-        return self.summary
+        clf = LazyClassifier(verbose=0, ignore_warnings=True,
+                             predictions=True, cv=lc_cv_folds,
+                             random_state=random_state)
+
+        t0 = time.perf_counter()
+        models, preds = clf.fit(Xtr_v, Xte_v, ytr, yte)
+        leaderboards[name] = models
+
+        rows += _summary_rows(name, models, preds, yte)
+        _print_best(name, rows, time.perf_counter() - t0)
+
+    summary = pd.DataFrame(rows)
+    summary.to_csv(summary_path, index=False)
+    return summary, leaderboards
+
+
+def load_summary(summary_path: str) -> pd.DataFrame:
+    """summary aus der CSV holen - fuer Auswertungszellen nach einem
+    Kernel-Neustart."""
+    if not os.path.exists(summary_path):
+        raise FileNotFoundError(f"{summary_path} fehlt -> zuerst phase_c().")
+    summary = pd.read_csv(summary_path)
+    print(f"summary aus {summary_path} geladen.")
+    return summary
 
 
 # =========================================================================

@@ -1,9 +1,9 @@
 """Feature-Extraktion mit Chunk-Cache und Feature-Auswahl.
 
 Der Chunk-Cache ist das Rueckgrat der langen Laeufe: jede Konfiguration
-wird in Bloecken von cfg.chunk_runs Runs extrahiert und als Pickle
-abgelegt. Ein abgebrochener Nachtlauf setzt beim naechsten Start genau
-dort wieder an.
+wird in Bloecken von `chunk_runs` Runs extrahiert und als Pickle abgelegt.
+Ein abgebrochener Nachtlauf setzt beim naechsten Start genau dort wieder
+an.
 
 Dateinamen im Cache-Ordner:
     {name}__{split}__{tag}__{idx:04d}.pkl    Feature-Chunks
@@ -22,21 +22,65 @@ import pandas as pd
 from sklearn.feature_selection import f_classif
 from tqdm.auto import tqdm
 from tsfresh import extract_features
+from tsfresh.feature_extraction.settings import (
+    ComprehensiveFCParameters, EfficientFCParameters, MinimalFCParameters)
 from tsfresh.feature_selection.relevance import calculate_relevance_table
 from tsfresh.utilities.dataframe_functions import impute
 
-from .config import PipelineConfig
-from .data import run_id
+from ..core import run_id
 from .projections import config_name, project
 
+FC_MODES = {"minimal": MinimalFCParameters,
+            "efficient": EfficientFCParameters,
+            "comprehensive": ComprehensiveFCParameters}
 
-def chunk_path(cfg: PipelineConfig, spec, split: str, tag: str, idx: int) -> str:
-    return cfg.cache_path(
-        f"{config_name(spec)}__{split}__{tag}__{idx:04d}.pkl")
+
+def fc_parameters(fc_mode: str = "efficient") -> dict:
+    """Der TSFresh-Calculator-Satz zu einem Kuerzel."""
+    if fc_mode not in FC_MODES:
+        raise ValueError(f"fc_mode={fc_mode!r} unbekannt "
+                         f"(bekannt: {sorted(FC_MODES)})")
+    return FC_MODES[fc_mode]()
 
 
-def top_features_path(cfg: PipelineConfig, spec) -> str:
-    return cfg.cache_path(f"{config_name(spec)}__top{cfg.top_k}.json")
+def cache_dir(scaling_mode: str = "global_mean",
+              smoke_test: bool = False) -> str:
+    """Cache-Ordner, angelegt falls noetig.
+
+    Der Ordner ist BEWUSST zwischen den Notebooks geteilt - die
+    ``raw``-Konfiguration ist ueberall bitidentisch, ihre Chunks und die
+    Top-K-Auswahl werden dadurch wiederverwendet. `smoke_test` bekommt
+    einen eigenen Ordner und ueberschreibt also nichts.
+    """
+    path = "tsfresh_cache_smoke" if smoke_test else "tsfresh_cache"
+    if scaling_mode != "global_mean":
+        path += f"_{scaling_mode}"
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def chunk_path(cache: str, spec, split: str, tag: str, idx: int) -> str:
+    return os.path.join(cache,
+                        f"{config_name(spec)}__{split}__{tag}__{idx:04d}.pkl")
+
+
+def top_features_path(cache: str, spec, top_k: int) -> str:
+    return os.path.join(cache, f"{config_name(spec)}__top{top_k}.json")
+
+
+def load_top_names(cache: str, spec, top_k: int) -> list | None:
+    """Ausgewaehlte Featurenamen aus dem Cache, oder None."""
+    path = top_features_path(cache, spec, top_k)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def save_top_names(cache: str, spec, top_k: int, names: list) -> None:
+    with open(top_features_path(cache, spec, top_k), "w",
+              encoding="utf-8") as fh:
+        json.dump(names, fh, indent=1)
 
 
 def _subset(part: pd.DataFrame, usecols) -> pd.DataFrame:
@@ -52,18 +96,23 @@ def _subset(part: pd.DataFrame, usecols) -> pd.DataFrame:
     return part[usecols]
 
 
-def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
-                   tag: str = "full", kind_to_fc=None, usecols=None,
-                   scaler=None) -> pd.DataFrame:
+def extract_config(spec, split: str, runs: dict, cache: str, *,
+                   tag: str = "full", fc_params=None, kind_to_fc=None,
+                   usecols=None, chunk_runs: int = 250,
+                   n_jobs: int | None = None,
+                   scaling_mode: str = "global_mean", scaler=None,
+                   fix_signs: bool = True, **proj_params) -> pd.DataFrame:
     """Extrahiert TSFresh-Features fuer EINE Konfiguration.
 
-    tag        : Cache-Kennung ("full" = alle Features,
-                 "top{K}" = nur die Top-K aus Phase A). Bei "top" MUSS
-                 K im Tag stehen, sonst kollidieren Laeufe mit
-                 unterschiedlichem top_k im selben Cache.
-    kind_to_fc : wenn gesetzt, werden NUR diese Features berechnet
-                 (aus tsfresh.from_columns) - der billige Weg fuer Phase B
-    usecols    : beim Laden aus dem Cache nur diese Spalten behalten (RAM)
+    tag         : Cache-Kennung ("full" = alle Features, "top{K}" = nur die
+                  Top-K aus Phase A). Bei "top" MUSS K im Tag stehen, sonst
+                  kollidieren Laeufe mit unterschiedlichem top_k im selben
+                  Cache.
+    fc_params   : Calculator-Satz (aus fc_parameters()); bei kind_to_fc egal
+    kind_to_fc  : wenn gesetzt, werden NUR diese Features berechnet
+                  (aus tsfresh.from_columns) - der billige Weg fuer Phase B
+    usecols     : beim Laden aus dem Cache nur diese Spalten behalten (RAM)
+    proj_params : gehen unveraendert an project()
 
     Rueckgabe: DataFrame, Index = run_id, Spalten = Featurenamen (float32).
     """
@@ -71,11 +120,11 @@ def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
     keys = sorted(runs.keys())
     parts, n_failed = [], 0
 
-    it = tqdm(list(range(0, len(keys), cfg.chunk_runs)),
+    it = tqdm(list(range(0, len(keys), chunk_runs)),
               desc=f"{name:20s} [{split}/{tag}]")
 
     for ci, start in enumerate(it):
-        path = chunk_path(cfg, spec, split, tag, ci)
+        path = chunk_path(cache, spec, split, tag, ci)
         if os.path.exists(path):
             part = pd.read_pickle(path)
             parts.append(_subset(part, usecols))
@@ -83,9 +132,10 @@ def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
 
         # --- Chunk aufbauen: projizieren und ins tsfresh-Wide-Format ---
         frames = []
-        for key in keys[start:start + cfg.chunk_runs]:
+        for key in keys[start:start + chunk_runs]:
             try:
-                Y, names = project(runs[key], spec, cfg, scaler)
+                Y, names = project(runs[key], spec, scaling_mode, scaler,
+                                   fix_signs, **proj_params)
             except Exception:
                 n_failed += 1      # z.B. numerisches Scheitern der DyCA-Stufe
                 continue
@@ -104,10 +154,10 @@ def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
             warnings.simplefilter("ignore")
             part = extract_features(
                 wide, column_id="id", column_sort="time",
-                default_fc_parameters=(None if kind_to_fc
-                                       else cfg.fc_parameters),
+                default_fc_parameters=(None if kind_to_fc else fc_params),
                 kind_to_fc_parameters=kind_to_fc,
-                n_jobs=cfg.n_jobs, disable_progressbar=True)
+                n_jobs=n_jobs if n_jobs is not None else (os.cpu_count() or 4),
+                disable_progressbar=True)
 
         part = part.astype(np.float32)
         part.to_pickle(path)
@@ -124,17 +174,18 @@ def extract_config(cfg: PipelineConfig, spec, split: str, runs: dict,
     return pd.concat(parts) if parts else pd.DataFrame()
 
 
-def rank_features(cfg: PipelineConfig, X: pd.DataFrame,
-                  y: pd.Series) -> pd.DataFrame:
+def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000,
+                  n_jobs: int | None = None) -> pd.DataFrame:
     """Bewertet alle Spalten von X und liefert eine sortierte Rangtabelle.
 
     Sortierkriterium: n_significant absteigend (Zahl der Klassen, die das
     Feature signifikant trennt), bei Gleichstand ANOVA-F absteigend.
     Blockweise, damit die Roh-Konfiguration (40k Spalten) in den RAM passt.
     """
+    n_jobs = n_jobs if n_jobs is not None else (os.cpu_count() or 4)
     parts = []
-    for start in range(0, X.shape[1], cfg.block_cols):
-        Xb = X.iloc[:, start:start + cfg.block_cols].astype("float64")
+    for start in range(0, X.shape[1], block_cols):
+        Xb = X.iloc[:, start:start + block_cols].astype("float64")
         Xb = impute(Xb)                       # NaN/inf -> endliche Werte
         # Konstante Spalten tragen nichts bei und stoeren die Tests.
         Xb = Xb.loc[:, Xb.to_numpy().std(axis=0) > 0]
@@ -145,7 +196,7 @@ def rank_features(cfg: PipelineConfig, X: pd.DataFrame,
             warnings.simplefilter("ignore")
             rt = calculate_relevance_table(
                 Xb, y, ml_task="classification", multiclass=True,
-                n_significant=1, n_jobs=cfg.n_jobs)
+                n_significant=1, n_jobs=n_jobs)
             f_val, _ = f_classif(Xb.to_numpy(), y.to_numpy())
 
         p_cols = [c for c in rt.columns if c.startswith("p_value_")]
@@ -167,17 +218,3 @@ def rank_features(cfg: PipelineConfig, X: pd.DataFrame,
     rank["f_value"] = rank["f_value"].fillna(0.0)
     return rank.sort_values(["n_significant", "f_value"],
                             ascending=[False, False]).reset_index(drop=True)
-
-
-def load_top_names(cfg: PipelineConfig, spec) -> list | None:
-    """Ausgewaehlte Featurenamen aus dem Cache, oder None."""
-    path = top_features_path(cfg, spec)
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def save_top_names(cfg: PipelineConfig, spec, names: list) -> None:
-    with open(top_features_path(cfg, spec), "w", encoding="utf-8") as fh:
-        json.dump(names, fh, indent=1)

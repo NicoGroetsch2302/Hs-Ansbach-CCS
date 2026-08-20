@@ -15,8 +15,10 @@ Zwei Notebook-Familien, ein Fundament:
                  Fehlerklasse, als Spektren- und Balkenplots. Dazu die
                  Klassifikation auf den exportierten Spektren.
 
-Die Notebooks importieren aus den Unterpaketen:
+Es gibt keine Konfigurationsobjekte und keine Zustandsklassen: jede
+Funktion nimmt entgegen, was sie braucht, und gibt zurueck, was die
+naechste braucht. Die Notebooks importieren aus den Unterpaketen:
 
-    from tep.tsfresh import Pipeline, PipelineConfig
-    from tep.eigen import SpectrumConfig, run_spectra
+    from tep.tsfresh import phase_a, phase_b, phase_c
+    from tep.eigen import load_train, run_spectra, aggregate
 """

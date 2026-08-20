@@ -1,4 +1,4 @@
-"""Die Spektren-Verfahren als Registry.
+"""Die Spektren-Verfahren als Registry aus einfachen dicts.
 
 Jedes Verfahren liefert pro (faultNumber, simulationRun) einen Vektor von
 Kennzahlen - Eigenwerte, kanonische Korrelationen oder Kurtosis-Werte. Der
@@ -13,7 +13,24 @@ steht in `run_spectra`.
     "ica"    |Kurtosis| der FastICA-Quellen, absteigend    -> ica_1..12
     "lda"    Fisher-Kennzahl gegen einen Normalbetriebslauf-> lda_eigenvalue
 
-Eigene Verfahren kommen ueber einen Eintrag in `SPECTRA` dazu.
+Ein Eintrag in SPECTRA hat die Schluessel:
+
+    prefix          Spaltenpraefix der Werte ("lambda_", "dyca_", ...)
+    label           Klartextname fuer Plottitel ("PCA", "DyCA", ...)
+    csv_stem        Dateiname-Stamm des Exports ("pca_eigenvalues")
+    apply           (X_scaled, **params) -> Wertevektor, oder
+                    (Wertevektor, extras-dict)
+    scalar          True, wenn EINE Zahl je Run herauskommt (nur LDA)
+    forced_scaling  erzwingt einen Skalierungsmodus (LDA: "scaler")
+    extra_cols      zusaetzliche Spalten aus dem extras-dict (ICA)
+
+Die letzten drei sind optional; wer sie nicht setzt, bekommt den Default
+ueber SPECTRA[method].get(...). Eigene Verfahren kommen als weiterer
+SPECTRA-Eintrag dazu.
+
+Jede `apply`-Funktion nimmt genau die Parameter entgegen, die sie
+wirklich braucht, und schluckt den Rest mit `**_`. Was ein Verfahren
+steuert, steht damit in seiner eigenen Signatur.
 
 WICHTIG - die Spaltennamen und die CSV-Namen sind eingefroren:
 `LazyClassifier_PCA_DyCA` liest die exportierten Dateien.
@@ -22,8 +39,6 @@ WICHTIG - die Spaltennamen und die CSV-Namen sind eingefroren:
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -32,61 +47,15 @@ from sklearn.decomposition import PCA, FastICA
 from sklearn.exceptions import ConvergenceWarning
 from tqdm.auto import tqdm
 
-from ..core import PROC_COLS, cva_covs, inv_sqrt_psd, lag_stack, scale
-
-
-# =========================================================================
-# Registry
-# =========================================================================
-
-@dataclass(frozen=True)
-class Spectrum:
-    """Ein Spektrum-Verfahren.
-
-    prefix      Spaltenpraefix der Werte ("lambda_", "dyca_", ...)
-    label       Klartextname fuer Plottitel ("PCA", "DyCA", ...)
-    csv_stem    Dateiname-Stamm des Exports ("pca_eigenvalues")
-    apply       (X_scaled, ctx) -> Wertevektor, oder (Vektor, extras-dict)
-    scalar      True, wenn das Verfahren EINE Zahl je Run liefert (LDA)
-    min_samples cfg -> Mindestlaenge eines Runs; kuerzere werden
-                uebersprungen. None = keine Pruefung.
-    forced_scaling  erzwingt einen Skalierungsmodus (LDA: "scaler")
-    extra_cols  zusaetzliche Spalten, die apply() im extras-dict liefert
-    """
-    prefix: str
-    label: str
-    csv_stem: str
-    apply: Callable
-    scalar: bool = False
-    min_samples: Callable | None = None
-    forced_scaling: str | None = None
-    extra_cols: tuple = ()
-
-
-SPECTRA: dict = {}
-
-
-def get(method: str) -> Spectrum:
-    if method not in SPECTRA:
-        raise ValueError(f"Unbekanntes Verfahren: {method!r} "
-                         f"(bekannt: {sorted(SPECTRA)})")
-    return SPECTRA[method]
-
-
-@dataclass
-class Context:
-    """Was ein Verfahren ausser den Messdaten noch braucht."""
-    cfg: object
-    ff_by_run: dict = field(default_factory=dict)
-    fault: int = 0
-    run: int = 0
+from ..core import (PRE_FAULT_CUTOFF, PROC_COLS, cva_covs, inv_sqrt_psd,
+                    lag_stack, scale)
 
 
 # =========================================================================
 # Die Verfahren
 # =========================================================================
 
-def _apply_pca(X, ctx):
+def _apply_pca(X, **_):
     # n_components = Anzahl Prozessvariablen -> ALLE Eigenwerte, auch die
     # kleinen aus dem Noise-Subspace. svd_solver="full" garantiert das
     # vollstaendige Spektrum, absteigend sortiert und reell.
@@ -98,78 +67,50 @@ def _apply_pca(X, ctx):
     return pca.explained_variance_ratio_
 
 
-SPECTRA["pca"] = Spectrum(
-    prefix="lambda_", label="PCA", csv_stem="pca_eigenvalues",
-    apply=_apply_pca)
-
-
-def _apply_dyca(X, ctx):
+def _apply_dyca(X, dyca_m=2, dyca_n=4, **_):
     from dyca import dyca
-    res = dyca(X, m=ctx.cfg.dyca_m, n=ctx.cfg.dyca_n)
+
+    res = dyca(X, m=dyca_m, n=dyca_n)
     return np.asarray(res["generalized_eigenvalues"], dtype=float)
 
 
-SPECTRA["dyca"] = Spectrum(
-    prefix="dyca_", label="DyCA", csv_stem="dyca_eigenvalues",
-    apply=_apply_dyca,
-    min_samples=lambda cfg: max(cfg.dyca_m, cfg.dyca_n) + 5)
-
-
-def _apply_dpca(X, ctx):
-    Z = lag_stack(X, ctx.cfg.dpca_lags)
+def _apply_dpca(X, dpca_lags=2, **_):
+    Z = lag_stack(X, dpca_lags)
     pca = PCA(n_components=None, svd_solver="full")
     pca.fit(Z)
     return pca.explained_variance_ratio_
 
 
-SPECTRA["dpca"] = Spectrum(
-    prefix="dpca_", label="DPCA", csv_stem="dpca_eigenvalues",
-    apply=_apply_dpca)
-
-
-def _apply_cva(X, ctx):
+def _apply_cva(X, cva_past=1, cva_fut=1, ridge_rel=1e-6, **_):
     """Kanonische Korrelationen zwischen Vergangenheits- und
     Zukunftsstapel: H = S_ff^(-1/2) S_fp S_pp^(-1/2), die Singulaerwerte
     von H sind die Korrelationen und liegen in [0, 1]."""
-    cfg = ctx.cfg
-    ridge = cfg.ridge_rel
     _, _, Spp, Sff, Sfp = cva_covs(np.asarray(X, dtype=np.float64),
-                                   cfg.cva_past, cfg.cva_fut)
-    H = inv_sqrt_psd(Sff, ridge) @ Sfp @ inv_sqrt_psd(Spp, ridge)
+                                   cva_past, cva_fut)
+    H = inv_sqrt_psd(Sff, ridge_rel) @ Sfp @ inv_sqrt_psd(Spp, ridge_rel)
     corrs = np.linalg.svd(H, compute_uv=False)
     # Floating-Point-Rauschen kann winzige negative Werte bzw. Werte
     # knapp ueber 1 erzeugen - beides ist keine echte Korrelation.
     return np.clip(corrs, 0.0, 1.0)
 
 
-SPECTRA["cva"] = Spectrum(
-    prefix="cva_", label="CVA", csv_stem="cva_eigenvalues",
-    apply=_apply_cva,
-    min_samples=lambda cfg: len(PROC_COLS) + cfg.cva_past + cfg.cva_fut + 5)
-
-
-def _apply_ica(X, ctx):
+def _apply_ica(X, ica_n=12, ica_max_iter=1000, ica_tol=1e-3,
+               ica_random_state=42, **_):
     """Nicht-Gaussianitaets-Spektrum: Kurtosis der FastICA-Quellen, nach
     Betrag absteigend sortiert. Ob FastICA konvergiert ist, wird als
     eigene Spalte mitgefuehrt."""
-    cfg = ctx.cfg
     X = np.asarray(X, dtype=np.float64)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        ica = FastICA(n_components=cfg.ica_n, whiten="unit-variance",
-                      max_iter=cfg.ica_max_iter, tol=cfg.ica_tol,
-                      random_state=cfg.ica_random_state)
+        ica = FastICA(n_components=ica_n, whiten="unit-variance",
+                      max_iter=ica_max_iter, tol=ica_tol,
+                      random_state=ica_random_state)
         S = ica.fit_transform(X)
     converged = not any(issubclass(w.category, ConvergenceWarning)
                         for w in caught)
     kurt = stats.kurtosis(S, axis=0, fisher=True, bias=True)
     order = np.argsort(-np.abs(kurt))
     return kurt[order], {"converged": int(converged)}
-
-
-SPECTRA["ica"] = Spectrum(
-    prefix="ica_", label="ICA", csv_stem="ica_eigenvalues",
-    apply=_apply_ica, extra_cols=("converged",))
 
 
 def lda_eigenvalue(X0: np.ndarray, X1: np.ndarray, ridge_rel: float) -> float:
@@ -190,7 +131,7 @@ def lda_eigenvalue(X0: np.ndarray, X1: np.ndarray, ridge_rel: float) -> float:
     return n0 * n1 / (n0 + n1) * float(d @ np.linalg.solve(Sw, d))
 
 
-def _apply_lda(X, ctx):
+def _apply_lda(X, ff_by_run=None, fault=0, run=0, ridge_rel=1e-6, **_):
     """Jeder Lauf wird gegen einen Normalbetriebslauf gestellt.
 
     Fault != 0 : Fehlerlauf gegen den FaultFree-Lauf gleicher Run-Nummer.
@@ -198,50 +139,130 @@ def _apply_lda(X, ctx):
                  Referenzklasse mit sich selbst verglichen und lambda
                  trivialerweise null.
     """
-    ff = ctx.ff_by_run
-    run_ids = sorted(ff)
-    if ctx.fault == 0:
-        X1 = ff[ctx.run]
-        X0 = ff[run_ids[(run_ids.index(ctx.run) + 1) % len(run_ids)]]
+    run_ids = sorted(ff_by_run)
+    if fault == 0:
+        X1 = ff_by_run[run]
+        X0 = ff_by_run[run_ids[(run_ids.index(run) + 1) % len(run_ids)]]
     else:
         X1 = X
-        X0 = ff[ctx.run]
-    return np.array([lda_eigenvalue(X0, X1, ctx.cfg.ridge_rel)])
+        X0 = ff_by_run[run]
+    return np.array([lda_eigenvalue(X0, X1, ridge_rel)])
 
 
-SPECTRA["lda"] = Spectrum(
-    prefix="lda_eigenvalue", label="LDA", csv_stem="lda_eigenvalues",
-    apply=_apply_lda, scalar=True,
-    # LDA vergleicht ZWEI Laeufe. Bei "global_mean" zoege jeder Lauf
-    # seinen eigenen skalaren Mittelwert ab - die Mittelwertsdifferenz d,
-    # also genau das Signal, waere dann verfaelscht.
-    forced_scaling="scaler")
+SPECTRA = {
+    "pca": {"prefix": "lambda_", "label": "PCA",
+            "csv_stem": "pca_eigenvalues", "apply": _apply_pca},
+    "dyca": {"prefix": "dyca_", "label": "DyCA",
+             "csv_stem": "dyca_eigenvalues", "apply": _apply_dyca},
+    "dpca": {"prefix": "dpca_", "label": "DPCA",
+             "csv_stem": "dpca_eigenvalues", "apply": _apply_dpca},
+    "cva": {"prefix": "cva_", "label": "CVA",
+            "csv_stem": "cva_eigenvalues", "apply": _apply_cva},
+    "ica": {"prefix": "ica_", "label": "ICA",
+            "csv_stem": "ica_eigenvalues", "apply": _apply_ica,
+            "extra_cols": ("converged",)},
+    # LDA vergleicht ZWEI Laeufe. Bei "global_mean" zoege jeder Lauf seinen
+    # eigenen skalaren Mittelwert ab - die Mittelwertsdifferenz d, also
+    # genau das Signal, waere dann verfaelscht.
+    "lda": {"prefix": "lda_eigenvalue", "label": "LDA",
+            "csv_stem": "lda_eigenvalues", "apply": _apply_lda,
+            "scalar": True, "forced_scaling": "scaler"},
+}
+
+
+def get(method: str) -> dict:
+    """Der SPECTRA-Eintrag zu `method`, mit klarer Fehlermeldung."""
+    if method not in SPECTRA:
+        raise ValueError(f"Unbekanntes Verfahren: {method!r} "
+                         f"(bekannt: {sorted(SPECTRA)})")
+    return SPECTRA[method]
+
+
+def label(method: str) -> str:
+    """Klartextname fuer Plottitel, z.B. "DyCA"."""
+    return get(method)["label"]
+
+
+def prefix(method: str) -> str:
+    """Spaltenpraefix der Spektrumswerte, z.B. "lambda_" oder "dyca_"."""
+    return get(method)["prefix"]
+
+
+def needs_scaler(method: str, scaling_mode: str = "global_mean") -> bool:
+    """Ob ein StandardScaler gefittet werden muss: bei
+    scaling_mode="scaler" und immer bei LDA (das Verfahren erzwingt ihn)."""
+    return (scaling_mode == "scaler"
+            or get(method).get("forced_scaling") == "scaler")
+
+
+def csv_name(method: str, scaling_mode: str = "global_mean",
+             split: str = "train") -> str:
+    """Dateiname der Export-CSV.
+
+    Die Namen sind eingefroren - `LazyClassifier_PCA_DyCA` liest sie. Der
+    Skalierungsmodus steckt im Namen, ein Umschalten ueberschreibt also
+    keine alten Ergebnisse.
+    """
+    suffix = "" if scaling_mode == "global_mean" else "_scaler"
+    return f"{get(method)['csv_stem']}_{split}{suffix}.csv"
+
+
+def min_samples(method: str, dyca_m: int = 2, dyca_n: int = 4,
+                cva_past: int = 1, cva_fut: int = 1) -> int | None:
+    """Mindestlaenge eines Runs; kuerzere werden uebersprungen.
+    None = keine Pruefung noetig."""
+    if method == "dyca":
+        return max(dyca_m, dyca_n) + 5
+    if method == "cva":
+        return len(PROC_COLS) + cva_past + cva_fut + 5
+    return None
 
 
 # =========================================================================
 # Die gemeinsame Schleife
 # =========================================================================
 
-def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
+def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
+                scaler=None, ff_by_run=None,
+                pre_fault_cutoff: int = PRE_FAULT_CUTOFF["train"],
+                head_fault0: int | None = None,
+                head_faulty: int | None = None,
+                dyca_m: int = 2, dyca_n: int = 4, dpca_lags: int = 2,
+                cva_past: int = 1, cva_fut: int = 1, ridge_rel: float = 1e-6,
+                ica_n: int = 12, ica_max_iter: int = 1000,
+                ica_tol: float = 1e-3, ica_random_state: int = 42,
                 verbose: bool = True) -> pd.DataFrame:
     """Berechnet das Spektrum je (faultNumber, simulationRun).
+
+    Die Verfahrensparameter (dyca_*, dpca_*, cva_*, ica_*, ridge_rel)
+    stehen alle hier, damit ein Notebook nur setzt, was sein Verfahren
+    braucht; weitergereicht wird an die `apply`-Funktion des Verfahrens.
+
+    head_fault0 / head_faulty kuerzen jeden Run auf so viele Samples.
+    Gebraucht wird das nur im Testsplit, um die Fenster an das Training
+    anzugleichen (siehe classify.test_spectra).
 
     Rueckgabe: DataFrame mit 'faultNumber', 'simulationRun', den
     Spektrumsspalten und ggf. Extraspalten (ICA: 'converged').
     """
-    spec = get(cfg.method)
-    mode = spec.forced_scaling or cfg.scaling_mode
-    if spec.forced_scaling and cfg.scaling_mode != spec.forced_scaling:
-        print(f"Hinweis: {spec.label} arbeitet immer auf "
-              f"scaling_mode='{spec.forced_scaling}' "
-              f"(cfg sagt '{cfg.scaling_mode}').")
+    spec = get(method)
+    name = spec["label"]
+    mode = spec.get("forced_scaling") or scaling_mode
+    if spec.get("forced_scaling") and scaling_mode != spec["forced_scaling"]:
+        print(f"Hinweis: {name} arbeitet immer auf "
+              f"scaling_mode='{spec['forced_scaling']}' "
+              f"(uebergeben wurde '{scaling_mode}').")
 
-    ctx = Context(cfg=cfg, ff_by_run=ff_by_run or {})
-    limit = spec.min_samples(cfg) if spec.min_samples else None
+    params = dict(dyca_m=dyca_m, dyca_n=dyca_n, dpca_lags=dpca_lags,
+                  cva_past=cva_past, cva_fut=cva_fut, ridge_rel=ridge_rel,
+                  ica_n=ica_n, ica_max_iter=ica_max_iter, ica_tol=ica_tol,
+                  ica_random_state=ica_random_state,
+                  ff_by_run=ff_by_run or {})
+    limit = min_samples(method, dyca_m, dyca_n, cva_past, cva_fut)
 
     iterator = tqdm(df_all.groupby(["faultNumber", "simulationRun"],
                                    sort=True),
-                    desc=f"Berechne {spec.label}-Spektrum pro Run")
+                    desc=f"Berechne {name}-Spektrum pro Run")
 
     records, first_errors = [], []
     n_err = n_skip = 0
@@ -252,25 +273,22 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
         # Sampling); die ersten Samples sind effektiv Normalbetrieb und
         # wuerden die Fault-Statistik verwaessern.
         if fault != 0:
-            group = group[group["sample"] >= cfg.pre_fault_cutoff]
+            group = group[group["sample"] >= pre_fault_cutoff]
         if limit is not None and len(group) < limit:
             n_skip += 1
             continue
 
-        ctx.fault, ctx.run = int(fault), int(run)
         try:
             # Defensive Sortierung: df_all ist zwar global nach
             # (fault, run, sample) sortiert, aber DyCA und CVA brauchen die
             # zeitliche Ordnung zwingend - der Sort ist auf <= 500 Zeilen
             # billig und macht die Funktion unabhaengig vom Aufrufer.
             g = group.sort_values("sample")
-            # Fensterangleichung (nur im Testsplit gesetzt): auf dieselbe
-            # Anzahl Samples kuerzen, die das Training je Fault abdeckt.
-            head = cfg.head_fault0 if fault == 0 else cfg.head_faulty
+            head = head_fault0 if fault == 0 else head_faulty
             if head is not None:
                 g = g.head(head)
             X = scale(g[PROC_COLS].values, mode, scaler)
-            out = spec.apply(X, ctx)
+            out = spec["apply"](X, fault=int(fault), run=int(run), **params)
         except Exception as exc:
             # Ein einzelner numerisch gescheiterter Run darf eine Schleife
             # ueber 10 500 Laeufe nicht abbrechen - gezaehlt und weiter.
@@ -281,11 +299,11 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
 
         values, extras = out if isinstance(out, tuple) else (out, {})
         row = {"faultNumber": fault, "simulationRun": run}
-        if spec.scalar:
-            row[spec.prefix] = float(values[0])
+        if spec.get("scalar"):
+            row[spec["prefix"]] = float(values[0])
         else:
             for k, val in enumerate(values, start=1):
-                row[f"{spec.prefix}{k}"] = float(val)
+                row[f"{spec['prefix']}{k}"] = float(val)
         row.update(extras)
         records.append(row)
 
@@ -293,20 +311,21 @@ def run_spectra(cfg, df_all, scaler=None, ff_by_run=None,
         # Ein Lauf ohne ein einziges Ergebnis ist nie beabsichtigt - frueher
         # lief das Notebook stumm weiter und exportierte eine leere CSV.
         raise RuntimeError(
-            f"{spec.label}: KEIN einziger Run erfolgreich "
+            f"{name}: KEIN einziger Run erfolgreich "
             f"({n_err} Fehler, {n_skip} uebersprungen). "
             + ("Erste Fehler:\n" + "\n".join(first_errors)
                if first_errors else
                "Alle Runs waren kuerzer als das Minimum."))
 
     df = pd.DataFrame.from_records(records)
-    if not df.empty and not spec.scalar:
+    if not df.empty and not spec.get("scalar"):
         # Spalten nach Komponentenindex sortieren, damit die Reihenfolge
         # nicht von der Einfuegereihenfolge abhaengt.
-        cols = sorted([c for c in df.columns if c.startswith(spec.prefix)],
-                      key=lambda c: int(c[len(spec.prefix):]))
+        pre = spec["prefix"]
+        cols = sorted([c for c in df.columns if c.startswith(pre)],
+                      key=lambda c: int(c[len(pre):]))
         df = df[["faultNumber", "simulationRun"] + cols
-                + list(spec.extra_cols)]
+                + list(spec.get("extra_cols", ()))]
 
     if verbose:
         print(f"Erfolgreiche Runs: {len(df)}")

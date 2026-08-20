@@ -5,26 +5,28 @@ Fehlerklasse mit dem Spektrum eines Laufs? Pro (faultNumber,
 simulationRun) entsteht ein Wertevektor, der je Fehlerklasse ueber die
 500 Runs gemittelt wird.
 
-Ein Notebook besteht damit nur noch aus Konfiguration und Aufrufen:
+Ein Notebook ist damit ein gerader Ablauf aus Funktionsaufrufen; die
+Einstellungen stehen als Argumente daran, nicht in einem Konfigurations-
+objekt:
 
-    from tep.eigen import SpectrumConfig, load_train, merge_faults
-    from tep.eigen import run_spectra, aggregate, export, plot_means
+    from tep.eigen import (aggregate, export, fit_scaler, load_train,
+                           merge_faults, plot_means, run_spectra)
 
-    CFG = SpectrumConfig(method="dyca", scaling_mode="global_mean",
-                         dyca_m=2, dyca_n=4)
+    METHOD, SCALING, DATA_DIR = "dyca", "global_mean", "data_csv"
 
-    df_ff, df_faulty = load_train(CFG)
+    df_ff, df_faulty = load_train(data_dir=DATA_DIR)
     df_all = merge_faults(df_ff, df_faulty)
-    per_run = run_spectra(CFG, df_all, scaler=fit_scaler(CFG))
-    agg = aggregate(CFG, per_run)
-    plot_means(CFG, agg)
-    export(CFG, per_run)
+    scaler = fit_scaler(METHOD, SCALING, DATA_DIR)
+    per_run = run_spectra(df_all, METHOD, scaling_mode=SCALING,
+                          scaler=scaler, dyca_m=2, dyca_n=4)
+    agg = aggregate(per_run, METHOD)
+    plot_means(agg, METHOD, k_max=25)
+    export(per_run, METHOD, SCALING, DATA_DIR)
 
 Module
 ------
-config     SpectrumConfig - alle Stellschrauben
-data       Trainings-CSVs lesen und zusammenfuehren
-spectra    Registry der Verfahren (pca/dyca/dpca/cva/ica/lda)
+data       Trainings-CSVs lesen, zusammenfuehren, Scaler fitten
+spectra    Registry der Verfahren (pca/dyca/dpca/cva/ica/lda) als dicts
 aggregate  Mittelwert/Std je Fehlerklasse, CSV-Export
 plots      die vier Standardplots plus die LDA-Variante
 classify   Klassifikation auf den exportierten Spektren
@@ -34,28 +36,19 @@ werden mit `tep.tsfresh` geteilt.
 """
 
 from ..core import LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS, versions
-from ..core import fit_scaler as _core_fit_scaler
-from .aggregate import aggregate, export
-from .config import SpectrumConfig
-from .data import faultfree_by_run, load_train, merge_faults
+from .aggregate import aggregate, export, value_columns
+from .data import faultfree_by_run, fit_scaler, load_train, merge_faults
 from .plots import (plot_bars, plot_cv, plot_dyca_mn_estimate, plot_means,
                     plot_scalar, plot_stds, transform)
-from .spectra import SPECTRA, Spectrum, get, run_spectra
+from .spectra import (SPECTRA, csv_name, get, label, min_samples,
+                      needs_scaler, prefix, run_spectra)
 
 __all__ = [
-    "SpectrumConfig",
     "load_train", "merge_faults", "faultfree_by_run", "fit_scaler",
-    "run_spectra", "SPECTRA", "Spectrum", "get",
-    "aggregate", "export",
+    "run_spectra", "SPECTRA", "get", "label", "prefix", "needs_scaler",
+    "csv_name", "min_samples",
+    "aggregate", "export", "value_columns",
     "plot_means", "plot_stds", "plot_cv", "plot_bars",
     "plot_scalar", "plot_dyca_mn_estimate", "transform",
     "PROC_COLS", "META_COLS", "PRE_FAULT_CUTOFF", "LABELS", "versions",
 ]
-
-
-def fit_scaler(cfg: SpectrumConfig, verbose: bool = True):
-    """StandardScaler fitten - oder None, wenn er nicht gebraucht wird."""
-    if not cfg.needs_scaler:
-        return None
-    return _core_fit_scaler(cfg.data_path("TEP_FaultFree_Training.csv"),
-                            verbose=verbose)
