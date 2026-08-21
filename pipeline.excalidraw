@@ -76,9 +76,9 @@
   {
    "id": "r7",
    "type": "rectangle",
-   "x": 300,
+   "x": 270.0,
    "y": 160,
-   "width": 400,
+   "width": 460,
    "height": 64,
    "angle": 0,
    "strokeColor": "#495057",
@@ -110,9 +110,9 @@
   {
    "id": "t8",
    "type": "text",
-   "x": 308,
+   "x": 278.0,
    "y": 176.0,
-   "width": 384,
+   "width": 444,
    "height": 40.0,
    "angle": 0,
    "strokeColor": "#1e1e1e",
