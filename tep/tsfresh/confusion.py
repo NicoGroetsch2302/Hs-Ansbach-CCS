@@ -2,8 +2,8 @@
 
 Fester Modelltyp (RandomForest, wie im Hauptvergleich) ueber alle
 Konfigurationen -> die Unterschiede zwischen den Matrizen liegen allein an
-den Features. Datenbasis exakt wie Phase C: gemeinsame Runs, gleiche
-NaN-Behandlung, StandardScaler + RandomForest (wie lazypredict intern).
+den Features. Datenbasis exakt wie benchmark_models(): gemeinsame Runs,
+gleiche NaN-Behandlung, StandardScaler + RandomForest (wie lazypredict intern).
 
 `confusion()` liefert ein dict:
 
@@ -13,7 +13,7 @@ NaN-Behandlung, StandardScaler + RandomForest (wie lazypredict intern).
      "counts":  name -> DataFrame der absoluten Zaehlwerte}
 
 Die Vorhersagen werden als CSV im Cache abgelegt. Nach einem Kernel-
-Neustart laufen die Plotfunktionen damit ganz ohne Phase A/B/C.
+Neustart laufen die Plotfunktionen damit ganz ohne die drei Schritte.
 """
 
 from __future__ import annotations
@@ -78,8 +78,8 @@ def confusion(config_names: list, pred_path: str, train_top: dict | None =
         if not train_top or not test_top:
             raise RuntimeError(
                 "train_top/test_top fehlen und es gibt keinen Vorhersage-"
-                "Cache -> zuerst phase_a() und phase_b() ausfuehren (laufen "
-                "aus dem Chunk-Cache).")
+                "Cache -> zuerst select_features() und apply_features() "
+                "ausfuehren (laufen aus dem Chunk-Cache).")
         idx_tr, idx_te = common_runs(train_top, test_top)
         print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")
 
@@ -128,9 +128,10 @@ def confusion(config_names: list, pred_path: str, train_top: dict | None =
         }
         counts[name] = counts_frame(cm)
 
-    # Abgleich mit Phase C: dieser RF muss die RandomForest-Zeile aus summary
-    # reproduzieren. Kleine Abweichungen sind normal (RF-Zufallskomponente,
-    # lazypredict haengt zusaetzlich einen SimpleImputer vor den Scaler).
+    # Abgleich mit benchmark_models(): dieser RF muss die RandomForest-
+    # Zeile aus summary reproduzieren. Kleine Abweichungen sind normal
+    # (RF-Zufallskomponente; lazypredict haengt zusaetzlich einen
+    # SimpleImputer vor den Scaler).
     if summary_path and os.path.exists(summary_path):
         rf = pd.read_csv(summary_path)
         rf = rf[rf["Modell"] == "RandomForestClassifier"] \
@@ -139,7 +140,8 @@ def confusion(config_names: list, pred_path: str, train_top: dict | None =
              for n in results if n in rf.index}
         if d:
             w = max(d, key=d.get)
-            print(f"Abgleich mit Phase C: groesste Macro-F1-Abweichung "
+            print(f"Abgleich mit benchmark_models(): groesste "
+                  f"Macro-F1-Abweichung "
                   f"{d[w]:.4f} ({w})")
 
     if not results:
@@ -220,7 +222,10 @@ def plot_detail(cm: dict, focus: str | None = None,
 
 
 def plot_recall(cm: dict, n_worst: int = 5):
-    """Recall je Fault-Klasse und Konfiguration als Heatmap."""
+    """Recall je Fault-Klasse und Konfiguration als Heatmap.
+
+    Rueckgabe (fig, tab) wie plot_detail - main.py speichert die Figur.
+    """
     import matplotlib.pyplot as plt
 
     tab = recall_table(cm)
@@ -251,4 +256,4 @@ def plot_recall(cm: dict, n_worst: int = 5):
     print("Schwierigste Klassen (mittlerer Recall ueber alle "
           "Konfigurationen):")
     print(tab.mean(axis=0).sort_values().head(n_worst).round(3).to_string())
-    return tab
+    return fig, tab

@@ -4,9 +4,9 @@ Ein Notebook ist ein gerader Ablauf aus Funktionsaufrufen; die
 Einstellungen stehen als Argumente daran, nicht in einem Konfigurations-
 objekt:
 
-    from tep.tsfresh import (cache_dir, compare, confusion, describe,
-                             phase_a, phase_b, phase_c, plot_comparison,
-                             plot_confusion_grid, validate)
+    from tep.tsfresh import (apply_features, benchmark_models, cache_dir,
+                             compare, confusion, describe, plot_comparison,
+                             plot_confusion_grid, select_features, validate)
 
     CONFIGS = [("raw",), ("pca", 6), ("dyca", 6, 12)]
     SCALING, DATA_DIR, TOP_K = "global_mean", "data_csv", 100
@@ -14,11 +14,13 @@ objekt:
     NAMES = validate(CONFIGS)
 
     describe(CONFIGS, CACHE, top_k=TOP_K, scaling_mode=SCALING)
-    train_top, top_names = phase_a(CONFIGS, CACHE, data_dir=DATA_DIR,
-                                   top_k=TOP_K, scaling_mode=SCALING)
-    test_top = phase_b(CONFIGS, CACHE, top_names, data_dir=DATA_DIR,
-                       top_k=TOP_K, scaling_mode=SCALING)
-    summary, boards = phase_c(CONFIGS, train_top, test_top, SUMMARY_CSV)
+    train_top, top_names = select_features(CONFIGS, CACHE,
+                                           data_dir=DATA_DIR, top_k=TOP_K,
+                                           scaling_mode=SCALING)
+    test_top = apply_features(CONFIGS, CACHE, top_names, data_dir=DATA_DIR,
+                              top_k=TOP_K, scaling_mode=SCALING)
+    summary, boards = benchmark_models(CONFIGS, train_top, test_top,
+                                       SUMMARY_CSV)
 
     cmp = compare(summary, NAMES); plot_comparison(cmp)
     cm = confusion(NAMES, PRED_CSV, train_top, test_top)
@@ -29,7 +31,7 @@ Module
 data         Rohdaten laden
 projections  Registry der Verfahren (raw/pca/dyca/dpca/cva/ica/dycvda)
 features     Cache-Ordner, Chunk-Extraktion, Feature-Ranking
-pipeline     Phase A/B/C, gemeinsame Run-Menge
+pipeline     Merkmale waehlen/anwenden, Modelle vergleichen
 reporting    Vergleichstabellen und Balkenplot
 confusion    Confusion-Matrizen und ihre drei Plots
 
@@ -45,16 +47,16 @@ from .confusion import plot_grid as plot_confusion_grid
 from .confusion import plot_recall
 from .data import fit_scaler, load_runs
 from .features import cache_dir, extract_config, fc_parameters, rank_features
-from .pipeline import (common_runs, describe, load_summary, matrices, phase_a,
-                       phase_b, phase_c)
+from .pipeline import (apply_features, benchmark_models, common_runs,
+                       describe, load_summary, matrices, select_features)
 from .projections import (PROJECTORS, channel_names, config_name, n_channels,
                           project, validate)
 from .reporting import compare, plot_comparison
 
 __all__ = [
     "cache_dir", "fc_parameters", "validate", "describe", "fit_scaler",
-    "phase_a", "phase_b", "phase_c", "common_runs", "matrices",
-    "load_summary",
+    "select_features", "apply_features", "benchmark_models",
+    "common_runs", "matrices", "load_summary",
     "PROC_COLS", "META_COLS", "SPLIT_FILES", "PRE_FAULT_CUTOFF", "LABELS",
     "load_runs", "run_id", "labels_from_index",
     "PROJECTORS", "project", "config_name", "channel_names", "n_channels",

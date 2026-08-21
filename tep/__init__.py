@@ -19,6 +19,6 @@ Es gibt keine Konfigurationsobjekte und keine Zustandsklassen: jede
 Funktion nimmt entgegen, was sie braucht, und gibt zurueck, was die
 naechste braucht. Die Notebooks importieren aus den Unterpaketen:
 
-    from tep.tsfresh import phase_a, phase_b, phase_c
+    from tep.tsfresh import select_features, benchmark_models
     from tep.eigen import load_train, run_spectra, aggregate
 """

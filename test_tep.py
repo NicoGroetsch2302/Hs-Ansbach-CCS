@@ -87,6 +87,9 @@ def test_spectra_registry():
     # Die CSV-Namen sind eingefroren - LazyClassifier_PCA_DyCA liest sie.
     assert csv_name("pca") == "pca_eigenvalues_train.csv"
     assert csv_name("dyca", "scaler", "test") == "dyca_eigenvalues_test_scaler.csv"
+    # LDA erzwingt scaler -> Suffix auch bei global_mean, sonst hiesse eine
+    # Datei mit Scaler-Daten wie eine ohne.
+    assert csv_name("lda", "global_mean") == "lda_eigenvalues_train_scaler.csv"
 
 
 def test_needs_scaler():
@@ -128,6 +131,48 @@ def test_validate_rejects_bad_specs():
         except (AssertionError, ValueError):
             continue
         raise AssertionError(f"validate({bad}) haette scheitern muessen")
+
+
+def test_params_yaml():
+    """Jeder Schluessel aus params.yaml wird von der Zielfunktion auch
+    akzeptiert - ein Tippfehler faellt sonst erst nach Stunden auf."""
+    import inspect
+    import yaml
+
+    from tep.core import SPLIT_FILES
+    from tep.eigen import get, run_spectra
+    from tep.tsfresh import validate
+    from tep.tsfresh.projections import PROJECTORS
+
+    p = yaml.safe_load(open("params.yaml", encoding="utf-8"))
+
+    import main                          # Stufennamen gegen den Dispatcher
+    for stage in p["stages"]:
+        assert stage in main.STAGES, stage
+    assert p["scaling_mode"] in ("global_mean", "scaler")
+
+    known = set(inspect.signature(run_spectra).parameters)
+    for key in p["eigen"]["params"]:
+        assert key in known, f"eigen.params: run_spectra kennt '{key}' nicht"
+    for method in p["eigen"]["methods"] + p["classify"]["methods"]:
+        get(method)                      # wirft bei unbekanntem Verfahren
+
+    # proj_params gegen die apply-Funktionen pruefen, nicht gegen project():
+    # das hat **params und wuerde jeden Tippfehler stillschweigend schlucken.
+    specs = [tuple(c) for c in p["amplitudes"]["configs"]]
+    specs += [tuple(c) for c in p["tsfresh"]["configs"]]
+    validate([tuple(c) for c in p["amplitudes"]["configs"]])
+    validate([tuple(c) for c in p["tsfresh"]["configs"]])
+    accepted = set()
+    for spec in specs:
+        accepted |= set(inspect.signature(
+            PROJECTORS[spec[0]]["apply"]).parameters)
+    for key in p["proj_params"]:
+        assert key in accepted, f"proj_params: '{key}' kennt keine Projektion"
+
+    for split in p["amplitudes"]["splits"]:
+        assert split in SPLIT_FILES, split
+    assert p["tsfresh"]["fc_mode"] in ("minimal", "efficient", "comprehensive")
 
 
 if __name__ == "__main__":

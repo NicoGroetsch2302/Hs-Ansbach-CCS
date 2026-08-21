@@ -105,12 +105,13 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
     """Extrahiert TSFresh-Features fuer EINE Konfiguration.
 
     tag         : Cache-Kennung ("full" = alle Features, "top{K}" = nur die
-                  Top-K aus Phase A). Bei "top" MUSS K im Tag stehen, sonst
+                  Top-K aus select_features()). Bei "top" MUSS K im Tag
+                  stehen, sonst
                   kollidieren Laeufe mit unterschiedlichem top_k im selben
                   Cache.
     fc_params   : Calculator-Satz (aus fc_parameters()); bei kind_to_fc egal
     kind_to_fc  : wenn gesetzt, werden NUR diese Features berechnet
-                  (aus tsfresh.from_columns) - der billige Weg fuer Phase B
+                  (aus tsfresh.from_columns) - billig fuer apply_features()
     usecols     : beim Laden aus dem Cache nur diese Spalten behalten (RAM)
     proj_params : gehen unveraendert an project()
 

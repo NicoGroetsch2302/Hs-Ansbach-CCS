@@ -1,16 +1,16 @@
-"""Die drei Phasen des Laufs, jede als eigene Funktion.
+"""Die drei Schritte des Laufs, jeder als eigene Funktion.
 
-    phase_a  Trainingsruns extrahieren -> Top-K auswaehlen -> reduzieren
-    phase_b  Testruns extrahieren, aber NUR die in A ausgewaehlten Features
-    phase_c  LazyClassifier je Konfiguration, Ergebnis als summary-CSV
+    select_features   Trainingsruns extrahieren, bewerten, Top-K behalten
+    apply_features    Testruns extrahieren, aber NUR die gewaehlten Merkmale
+    benchmark_models  LazyClassifier je Konfiguration -> summary-CSV
 
-Jede Phase nimmt entgegen, was sie braucht, und gibt zurueck, was die
+Jeder Schritt nimmt entgegen, was sie braucht, und gibt zurueck, was die
 naechste braucht - kein gemeinsames Objekt, das den Zustand haelt:
 
     names = validate(CONFIGS)
-    train_top, top_names = phase_a(CONFIGS, CACHE, data_dir=..., ...)
-    test_top = phase_b(CONFIGS, CACHE, top_names, data_dir=..., ...)
-    summary = phase_c(CONFIGS, train_top, test_top, summary_path)
+    train_top, top_names = select_features(CONFIGS, CACHE, data_dir=..., ...)
+    test_top = apply_features(CONFIGS, CACHE, top_names, data_dir=..., ...)
+    summary = benchmark_models(CONFIGS, train_top, test_top, summary_path)
 
 Nach einem Kernel-Neustart genuegt fuer die Auswertung die summary-CSV
 (`load_summary`) bzw. der Vorhersage-Cache der Confusion-Matrizen.
@@ -57,10 +57,10 @@ def describe(configs, cache: str, *, fc_mode: str = "efficient",
 
 
 # =========================================================================
-# Phase A
+# Merkmale waehlen (Train)
 # =========================================================================
 
-def phase_a(configs, cache: str, *, data_dir: str = ".",
+def select_features(configs, cache: str, *, data_dir: str = ".",
             runs_per_fault: int | None = None, run_length: int | None = 480,
             fc_mode: str = "efficient", top_k: int = 100,
             chunk_runs: int = 250, block_cols: int = 4000,
@@ -117,24 +117,25 @@ def phase_a(configs, cache: str, *, data_dir: str = ".",
 
     del runs_train
     gc.collect()
-    print(f"\nPhase A komplett in "
+    print(f"\nMerkmalsauswahl komplett in "
           f"{(time.perf_counter() - t_start) / 60:.1f} min")
     return train_top, top_names
 
 
 # =========================================================================
-# Phase B
+# Merkmale anwenden (Test)
 # =========================================================================
 
-def phase_b(configs, cache: str, top_names: dict, *, data_dir: str = ".",
+def apply_features(configs, cache: str, top_names: dict, *,
+                   data_dir: str = ".",
             runs_per_fault: int | None = None, run_length: int | None = 480,
             top_k: int = 100, chunk_runs: int = 250,
             n_jobs: int | None = None, scaling_mode: str = "global_mean",
             scaler=None, fix_signs: bool = True, **proj_params) -> dict:
-    """Testset extrahieren - nur die in Phase A ausgewaehlten Features."""
+    """Testset extrahieren - nur die gewaehlten Merkmale."""
     if not top_names:
-        raise RuntimeError("Phase B braucht die Auswahl aus Phase A -> "
-                           "zuerst phase_a() (laeuft aus dem Cache).")
+        raise RuntimeError("top_names fehlt -> zuerst select_features() "
+                           "(laeuft aus dem Cache).")
 
     print("Lade Testruns ...")
     runs_test = load_runs("test", data_dir, runs_per_fault, run_length)
@@ -144,7 +145,7 @@ def phase_b(configs, cache: str, top_names: dict, *, data_dir: str = ".",
         name = config_name(spec)
         t0 = time.perf_counter()
         # top_k MUSS in der Cache-Kennung stehen: die Chunks enthalten
-        # genau die in Phase A ausgewaehlten Features. Ohne top_k im
+        # genau die in select_features() ausgewaehlten Features. Ohne top_k im
         # Namen wuerde ein spaeterer Lauf mit groesserem top_k die alten
         # Chunks wiederverwenden und die fehlenden Spalten stumm mit 0.0
         # auffuellen (siehe _subset in features.py).
@@ -187,8 +188,8 @@ def common_runs(train_top: dict, test_top: dict):
     Testmengen bewertet.
     """
     if not train_top or not test_top:
-        raise RuntimeError("train_top/test_top fehlen -> zuerst phase_a() "
-                           "und phase_b() ausfuehren.")
+        raise RuntimeError("train_top/test_top fehlen -> zuerst "
+                           "select_features() und apply_features().")
     tr = sorted(set.intersection(*(set(d.index) for d in train_top.values())))
     te = sorted(set.intersection(*(set(d.index) for d in test_top.values())))
     return tr, te
@@ -196,7 +197,7 @@ def common_runs(train_top: dict, test_top: dict):
 
 def matrices(name: str, train_top: dict, test_top: dict):
     """(Xtr, Xte, ytr, yte, test_index) einer Konfiguration - gemeinsame
-    Runs, NaN/inf aufgefuellt. Genau die Datenbasis von Phase C."""
+    Runs, NaN/inf aufgefuellt. Genau die Datenbasis von benchmark_models()."""
     idx_tr, idx_te = common_runs(train_top, test_top)
     Xtr = train_top[name].loc[idx_tr]
     Xte = test_top[name].loc[idx_te]
@@ -211,10 +212,11 @@ def matrices(name: str, train_top: dict, test_top: dict):
 
 
 # =========================================================================
-# Phase C
+# Modelle vergleichen
 # =========================================================================
 
-def phase_c(configs, train_top: dict, test_top: dict, summary_path: str,
+def benchmark_models(configs, train_top: dict, test_top: dict,
+                     summary_path: str,
             *, lc_cv_folds: int = 5, random_state: int = 42):
     """LazyClassifier je Konfiguration; schreibt die summary-CSV.
 
@@ -249,14 +251,15 @@ def load_summary(summary_path: str) -> pd.DataFrame:
     """summary aus der CSV holen - fuer Auswertungszellen nach einem
     Kernel-Neustart."""
     if not os.path.exists(summary_path):
-        raise FileNotFoundError(f"{summary_path} fehlt -> zuerst phase_c().")
+        raise FileNotFoundError(f"{summary_path} fehlt -> zuerst "
+                                f"benchmark_models().")
     summary = pd.read_csv(summary_path)
     print(f"summary aus {summary_path} geladen.")
     return summary
 
 
 # =========================================================================
-# Hilfsfunktionen fuer Phase C
+# Hilfsfunktionen fuer den Modellvergleich
 # =========================================================================
 
 def _cv_val(models: pd.DataFrame, col: str, model_name: str) -> float:

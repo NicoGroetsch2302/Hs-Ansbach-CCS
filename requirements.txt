@@ -8,6 +8,11 @@ dyca==1.0.3
 tsfresh==0.21.2
 lazypredict==0.3.0
 matplotlib==3.11.0
+pyyaml==6.0.3
 tqdm==4.68.2
+# ipywidgets ist nicht optional: ohne es faellt tqdm.auto auf die Text-
+# variante zurueck, und die schreibt beim Ausfuehren mit nbconvert jede
+# Aktualisierung als eigene Zeile ins Notebook (statt EINEN Balken).
+ipywidgets==8.1.9
 ipykernel==7.3.0
 jupyterlab==4.5.8

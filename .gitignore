@@ -8,3 +8,7 @@ __pycache__/
 
 /data_csv
 data_csv.zip
+
+
+/logs
+plots/

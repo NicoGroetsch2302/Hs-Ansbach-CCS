@@ -26,7 +26,7 @@ def compare(summary: pd.DataFrame, order: list, model: str = MAIN_MODEL,
             verbose: bool = True) -> dict:
     """Baut die drei Vergleichssichten aus der summary-Tabelle.
 
-    Laeuft auch OHNE Phase C, sobald die summary-CSV im Cache liegt -
+    Laeuft auch OHNE benchmark_models(), sobald die summary-CSV liegt -
     pipeline.load_summary() holt sie.
     """
     def in_order(df):

@@ -1,0 +1,93 @@
+# Alle Parameter des Laufs.  Aufruf:  python main.py [-p params.yaml] [stufe ...]
+#
+# Die Schluessel heissen genau wie die Argumente der tep-Funktionen;
+# test_tep.py gleicht das ab, ein Tippfehler faellt also vor dem Lauf auf
+# und nicht nach drei Stunden.
+
+data_dir: data_csv          # Ordner mit den vier TEP-CSVs
+scaling_mode: global_mean   # global_mean | scaler  (LDA erzwingt scaler)
+runs_per_fault: null        # null = alle 500 Runs je Fault; 3 = Probelauf
+plot_dir: plots             # hierhin die PNGs
+
+stages: [eigen, amplitudes, classify, tsfresh]
+
+
+# --- Verfahrensparameter der Projektionen (amplitudes UND tsfresh) -------
+# ACHTUNG: stecken NICHT im Konfigurationsnamen und damit nicht im
+# Cache-Praefix. Bei Aenderung vorher die betroffenen Chunks loeschen.
+proj_params:
+  dpca_lags: 2
+  cva_past: 1
+  cva_fut: 1
+  cva_ridge_rel: 1.0e-6
+  ica_max_iter: 1000
+  ica_tol: 1.0e-3
+  ica_random_state: 42
+
+
+# --- Stufe "eigen": Spektrum je (Fault, Run) -----------------------------
+eigen:
+  methods: [pca, dyca, dpca, cva, ica, lda]
+  params:                   # gehen an run_spectra; jedes Verfahren nimmt sich,
+    dyca_m: 2               # was es braucht, den Rest ignoriert es
+    dyca_n: 4
+    dpca_lags: 2
+    cva_past: 1
+    cva_fut: 1
+    ridge_rel: 1.0e-6       # CVA und LDA
+    ica_n: 12
+    ica_max_iter: 1000
+    ica_tol: 1.0e-3
+    ica_random_state: 42
+  k_max: 25                 # Komponenten in den Linienplots
+  k_bar: 10                 # Balken im Balkenplot
+  plot_mode: linear         # linear | log | relative
+  ncols: 6                  # Subplots je Zeile
+
+
+# --- Stufe "amplitudes": y(t) je Lauf als NPZ ----------------------------
+amplitudes:
+  configs:                  # [Verfahren, ...Parameter]
+    - [dyca, 6, 12]         # (m, n)
+    - [pca, 6]
+    - [cva, 8]
+    - [ica, 12]
+    - [dpca, 6]
+    - [dycvda, 6, 12, 2, 15]  # (m, n, s, r)
+  splits: [train]           # train | test
+  run_length: 480           # gemeinsame Laenge je Lauf; null = ungekuerzt
+
+
+# --- Stufe "classify": Klassifikation AUF den Spektren -------------------
+classify:
+  methods: [pca, dyca]      # muessen zu eigen.params passen
+  cv_folds: 5
+  select_metric: Balanced Accuracy CV Mean
+  random_state: 42
+
+
+# --- Stufe "tsfresh": Phase A/B/C ----------------------------------------
+# Fuer die Schwester-Laeufe (DPCA/CVA/ICA bzw. DyCVDA) diese Datei kopieren
+# und configs, label und die beiden CSV-Namen austauschen.
+tsfresh:
+  configs:
+    - [raw]
+    - [pca, 4]
+    - [pca, 6]
+    - [pca, 8]
+    - [pca, 10]
+    - [pca, 12]
+    - [dyca, 2, 4]
+    - [dyca, 3, 6]
+    - [dyca, 4, 8]
+    - [dyca, 5, 10]
+    - [dyca, 6, 12]
+  label: PCA/DyCA           # erscheint in den Plottiteln
+  top_k: 100                # Merkmale je Konfiguration
+  fc_mode: efficient        # minimal | efficient | comprehensive
+  chunk_runs: 250           # MUSS 250 bleiben, solange der Cache geteilt wird
+  run_length: 480
+  lc_cv_folds: 5
+  smoke_test: false         # true -> winziger Lauf, eigener Cache-Ordner
+  summary_csv: tsfresh_summary.csv
+  cm_pred_csv: tsfresh_cm_predictions.csv

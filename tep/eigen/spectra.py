@@ -202,8 +202,13 @@ def csv_name(method: str, scaling_mode: str = "global_mean",
     Die Namen sind eingefroren - `LazyClassifier_PCA_DyCA` liest sie. Der
     Skalierungsmodus steckt im Namen, ein Umschalten ueberschreibt also
     keine alten Ergebnisse.
+
+    Massgeblich ist der TATSAECHLICH verwendete Modus: LDA erzwingt
+    "scaler" (siehe forced_scaling), seine Datei traegt deshalb immer das
+    Suffix - sonst hiesse eine Datei mit Scaler-Daten wie eine ohne.
     """
-    suffix = "" if scaling_mode == "global_mean" else "_scaler"
+    mode = get(method).get("forced_scaling") or scaling_mode
+    suffix = "" if mode == "global_mean" else "_scaler"
     return f"{get(method)['csv_stem']}_{split}{suffix}.csv"
 
 
