@@ -40,12 +40,12 @@ werden mit `tep.eigen` geteilt.
 """
 
 from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
-                    SPLIT_FILES, labels_from_index, run_id)
+                    SPLIT_FILES, fit_scaler, labels_from_index, run_id)
 from .confusion import best, confusion, names, recall_table
 from .confusion import plot_detail as plot_confusion_detail
 from .confusion import plot_grid as plot_confusion_grid
 from .confusion import plot_recall
-from .data import fit_scaler, load_runs
+from .data import load_runs
 from .features import cache_dir, extract_config, fc_parameters, rank_features
 from .pipeline import (apply_features, benchmark_models, common_runs,
                        describe, load_summary, matrices, select_features)

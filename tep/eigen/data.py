@@ -83,18 +83,3 @@ def faultfree_by_run(df_ff, scaling_mode: str = "scaler",
         g = g.sort_values("sample")
         out[int(run)] = scale(g[PROC_COLS].values, scaling_mode, scaler)
     return out
-
-
-def fit_scaler(method: str, scaling_mode: str = "global_mean",
-               data_dir: str = ".", verbose: bool = True):
-    """StandardScaler fitten - oder None, wenn er nicht gebraucht wird.
-
-    Gebraucht wird er bei scaling_mode="scaler" und immer bei LDA.
-    """
-    from ..core import fit_scaler as core_fit_scaler
-    from .spectra import needs_scaler
-
-    if not needs_scaler(method, scaling_mode):
-        return None
-    return core_fit_scaler(
-        os.path.join(data_dir, "TEP_FaultFree_Training.csv"), verbose=verbose)

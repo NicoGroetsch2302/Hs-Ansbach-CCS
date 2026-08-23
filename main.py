@@ -32,9 +32,9 @@ import pandas as pd              # noqa: E402
 import yaml                      # noqa: E402
 
 from tep.eigen import (aggregate, csv_name, export, faultfree_by_run,  # noqa
-                       get, load_train, merge_faults, plot_bars, plot_cv,
-                       plot_means, plot_scalar, plot_stds, run_spectra)
-from tep.eigen import fit_scaler as eigen_scaler                       # noqa
+                       fit_scaler, get, load_train, merge_faults,
+                       needs_scaler, plot_bars, plot_cv, plot_means,
+                       plot_scalar, plot_stds, run_spectra)
 from tep.eigen.classify import (class_distribution, confusion,         # noqa
                                 feature_sets, plot_confusions,
                                 report_confusions, run_lazyclassifier,
@@ -45,7 +45,6 @@ from tep.tsfresh import (apply_features, benchmark_models, cache_dir,  # noqa
                          plot_confusion_detail, plot_confusion_grid,
                          plot_recall, project, select_features, validate)
 from tep.tsfresh import confusion as tsfresh_confusion                 # noqa
-from tep.tsfresh import fit_scaler as tsfresh_scaler                   # noqa
 
 
 def save(fig, name):
@@ -54,7 +53,7 @@ def save(fig, name):
     figs = fig if isinstance(fig, tuple) else (fig,)
     for i, f in enumerate(figs, start=1):
         suffix = "" if len(figs) == 1 else f"_{i}"
-        path = os.path.join(P["plot_dir"], f"{name}{suffix}.png")
+        path = os.path.join(Parameters["plot_dir"], f"{name}{suffix}.png")
         f.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(f)
         print(f"    Bild: {path}")
@@ -66,28 +65,30 @@ def save(fig, name):
 
 def stage_eigen():
     """Weg 1: Spektren je Verfahren, Plots, Klassifikation darauf."""
-    e = P["eigen"]
+    eigen_params = Parameters["eigen"]
     df_ff = df_all = None                 # erst lesen, wenn wirklich noetig
 
-    for method in e["methods"]:
-        path = os.path.join(P["data_dir"],
-                            csv_name(method, P["scaling_mode"], "train"))
+    for method in eigen_params["methods"]:
+        path = os.path.join(Parameters["data_dir"],
+                            csv_name(method, Parameters["scaling_mode"], "train"))
         if os.path.exists(path):
             per_run = pd.read_csv(path)
             print(f"  {method}: {per_run.shape} aus {path}")
         else:
-            if df_all is None:            # die 1,9 GB nur einmal lesen
-                df_ff, df_faulty = load_train(P["data_dir"],
-                                              P["runs_per_fault"])
+            if df_all is None:
+                df_ff, df_faulty = load_train(Parameters["data_dir"],
+                                              Parameters["runs_per_fault"])
                 df_all = merge_faults(df_ff, df_faulty)
-            scaler = eigen_scaler(method, P["scaling_mode"], P["data_dir"])
-            kw = dict(e["params"])
+            scaler = (fit_scaler(Parameters["data_dir"])
+                      if needs_scaler(method, Parameters["scaling_mode"])
+                      else None) # TODO: es wird skaliert vor der Berechnung der Eigenwerte
+            kw = dict(eigen_params["params"])
             if method == "lda":           # Lauf gegen Normalbetrieb
                 kw["ff_by_run"] = faultfree_by_run(df_ff, "scaler", scaler)
             per_run = run_spectra(df_all, method,
-                                  scaling_mode=P["scaling_mode"],
+                                  scaling_mode=Parameters["scaling_mode"],
                                   scaler=scaler, **kw)
-            export(per_run, method, P["scaling_mode"], P["data_dir"])
+            export(per_run, method, Parameters["scaling_mode"], Parameters["data_dir"])
 
         agg = aggregate(per_run, method)
         if get(method).get("scalar"):     # LDA: eine Zahl je Lauf
@@ -95,21 +96,22 @@ def stage_eigen():
         else:
             for fn, tag in ((plot_means, "mittel"), (plot_stds, "std"),
                             (plot_cv, "cv")):
-                save(fn(agg, method, e["k_max"], e["plot_mode"], e["ncols"]),
+                save(fn(agg, method, eigen_params["k_max"], eigen_params["plot_mode"], eigen_params["ncols"]),
                      f"eigen_{method}_{tag}")
-            save(plot_bars(agg, method, e["k_bar"], e["ncols"]),
+            save(plot_bars(agg, method, eigen_params["k_bar"], eigen_params["ncols"]),
                  f"eigen_{method}_balken")
 
-    if e["classify_methods"]:
-        _classify_spectra(e)
+    if eigen_params["classify_methods"]:
+        _classify_spectra(eigen_params)
 
 
 def stage_amplitudes():
     """Amplituden y(t) je Lauf als NPZ - eine Datei je Projektion und Split."""
-    a = P["amplitudes"]
+    a = Parameters["amplitudes"]
     configs = [tuple(c) for c in a["configs"]]
     validate(configs)
-    scaler = tsfresh_scaler(P["scaling_mode"], P["data_dir"])
+    scaler = (fit_scaler(Parameters["data_dir"])
+              if Parameters["scaling_mode"] == "scaler" else None)
 
     for split in a["splits"]:
         todo = [s for s in configs
@@ -120,14 +122,14 @@ def stage_amplitudes():
         if not todo:
             continue
 
-        runs = load_runs(split, P["data_dir"], P["runs_per_fault"],
+        runs = load_runs(split, Parameters["data_dir"], Parameters["runs_per_fault"],
                          a["run_length"])
         for spec in todo:
             keys, mats, n_failed = [], [], 0
             for key in sorted(runs):
                 try:
-                    Y, channels = project(runs[key], spec, P["scaling_mode"],
-                                          scaler, **P["proj_params"])
+                    Y, channels = project(runs[key], spec, Parameters["scaling_mode"],
+                                          scaler, **Parameters["proj_params"])
                 except Exception:
                     n_failed += 1         # z.B. numerisches Scheitern der DyCA
                     continue
@@ -147,7 +149,7 @@ def stage_amplitudes():
 
 
 def _npz(name, split):
-    return os.path.join(P["data_dir"], f"amplitudes.{name}.{split}.npz")
+    return os.path.join(Parameters["data_dir"], f"amplitudes.{name}.{split}.npz")
 
 
 def _classify_spectra(e):
@@ -158,9 +160,9 @@ def _classify_spectra(e):
     charakterisieren, nicht klassifizieren.
     """
     methods = e["classify_methods"]
-    train = train_spectra(methods, P["scaling_mode"], P["data_dir"])
-    test = test_spectra(methods, P["scaling_mode"], P["data_dir"],
-                        P["runs_per_fault"], **e["params"])
+    train = train_spectra(methods, Parameters["scaling_mode"], Parameters["data_dir"])
+    test = test_spectra(methods, Parameters["scaling_mode"], Parameters["data_dir"],
+                        Parameters["runs_per_fault"], **e["params"])
     sets = feature_sets(methods, train, test, combine=True)
     for s in sets:
         print(f"  {s['name']:12s} {len(s['cols']):3d} Merkmale | "
@@ -168,7 +170,7 @@ def _classify_spectra(e):
 
     print(class_distribution(sets).to_string())
 
-    board = os.path.join(P["data_dir"], "spektren_leaderboards.csv")
+    board = os.path.join(Parameters["data_dir"], "spektren_leaderboards.csv")
     if os.path.exists(board):
         print(f"  Leaderboards aus {board}")
     else:
@@ -187,29 +189,31 @@ def _classify_spectra(e):
 
 def stage_tsfresh():
     """Merkmalsauswahl, -anwendung, Modellvergleich plus Plots."""
-    t = P["tsfresh"]
+    t = Parameters["tsfresh"]
     configs = [tuple(x) for x in t["configs"]]
     names = validate(configs)
-    cache = cache_dir(P["scaling_mode"], t["smoke_test"])
+    cache = cache_dir(Parameters["scaling_mode"], t["smoke_test"])
     summary_path = os.path.join(cache, t["summary_csv"])
     pred_path = os.path.join(cache, t["cm_pred_csv"])
 
     describe(configs, cache, fc_mode=t["fc_mode"], top_k=t["top_k"],
-             scaling_mode=P["scaling_mode"],
-             runs_per_fault=P["runs_per_fault"], smoke_test=t["smoke_test"])
+             scaling_mode=Parameters["scaling_mode"],
+             runs_per_fault=Parameters["runs_per_fault"], smoke_test=t["smoke_test"])
 
     train_top = test_top = None
     if os.path.exists(summary_path) and os.path.exists(pred_path):
         # Beide Caches da
         summary = load_summary(summary_path)
     else:
-        common = dict(data_dir=P["data_dir"],
-                      runs_per_fault=P["runs_per_fault"],
+        common = dict(data_dir=Parameters["data_dir"],
+                      runs_per_fault=Parameters["runs_per_fault"],
                       run_length=t["run_length"], top_k=t["top_k"],
                       chunk_runs=t["chunk_runs"],
-                      scaling_mode=P["scaling_mode"],
-                      scaler=tsfresh_scaler(P["scaling_mode"], P["data_dir"]),
-                      **P["proj_params"])
+                      scaling_mode=Parameters["scaling_mode"],
+                      scaler=(fit_scaler(Parameters["data_dir"])
+                              if Parameters["scaling_mode"] == "scaler"
+                              else None),
+                      **Parameters["proj_params"])
         train_top, top_names = select_features(configs, cache,
                                                fc_mode=t["fc_mode"],
                                                **common)
@@ -246,11 +250,11 @@ if __name__ == "__main__":
     ap.add_argument("-p", "--params", default="params.yaml")
     args = ap.parse_args()
 
-    P = yaml.safe_load(open(args.params, encoding="utf-8"))
-    print_params(P)
-    os.makedirs(P["plot_dir"], exist_ok=True)
+    Parameters = yaml.safe_load(open(args.params, encoding="utf-8"))
+    print_params(Parameters)
+    os.makedirs(Parameters["plot_dir"], exist_ok=True)
 
-    for name in (args.stages or P["stages"]):
+    for name in (args.stages or Parameters["stages"]):
         print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
         STAGES[name]()
     print("\nfertig.")

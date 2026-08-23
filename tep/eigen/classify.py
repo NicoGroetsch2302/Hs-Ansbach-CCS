@@ -69,8 +69,7 @@ def test_spectra(methods, scaling_mode: str = "global_mean",
     if todo:
         scaler = None
         if any(needs_scaler(m, scaling_mode) for m in todo):
-            scaler = fit_scaler(
-                os.path.join(data_dir, "TEP_FaultFree_Training.csv"), verbose)
+            scaler = fit_scaler(data_dir, verbose)
 
         if verbose:
             print("Lade TEP-Test-CSVs (gross, dauert) ...", flush=True)

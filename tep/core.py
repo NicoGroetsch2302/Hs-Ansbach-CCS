@@ -16,6 +16,8 @@ import os
 
 import numpy as np
 import pandas as pd
+import gc
+from sklearn.preprocessing import StandardScaler
 
 # --- Spalten des TEP-Datensatzes ----------------------------------------
 XMEAS_COLS = [f"xmeas_{i}" for i in range(1, 42)]
@@ -60,20 +62,23 @@ def labels_from_index(index) -> pd.Series:
 # Vorverarbeitung
 # =========================================================================
 
-def fit_scaler(faultfree_train_path: str, verbose: bool = True):
+def fit_scaler(data_dir: str = ".", verbose: bool = True):
     """StandardScaler auf TEP_FaultFree_Training (Normalbetrieb) fitten.
 
     Der Fit sieht ausschliesslich Normalbetrieb - die Skalierung ist damit
     "in Einheiten des Normalbetriebs" und kennt keine Fehlerdaten.
-    """
-    import gc
 
-    from sklearn.preprocessing import StandardScaler
+    Fittet IMMER. Ob ueberhaupt einer gebraucht wird, entscheidet der
+    Aufrufer und steht dort auch sichtbar: bei tep.eigen ueber
+    needs_scaler(method, mode) - LDA erzwingt den Scaler -, bei
+    tep.tsfresh ueber scaling_mode == "scaler".
+    """
 
     if verbose:
         print("Fitte StandardScaler auf TEP_FaultFree_Training "
               "(Normalbetrieb) ...")
-    ff = pd.read_csv(faultfree_train_path, usecols=PROC_COLS)
+    ff = pd.read_csv(os.path.join(data_dir, "TEP_FaultFree_Training.csv"),
+                     usecols=PROC_COLS)
     scaler = StandardScaler().fit(ff[PROC_COLS].values)
     del ff
     gc.collect()
@@ -182,6 +187,3 @@ def default_estimator(random_state: int = 42):
     return make_pipeline(
         StandardScaler(),
         RandomForestClassifier(random_state=random_state, n_jobs=-1))
-
-
-

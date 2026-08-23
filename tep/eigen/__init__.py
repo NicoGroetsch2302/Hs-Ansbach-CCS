@@ -16,7 +16,7 @@ objekt:
 
     df_ff, df_faulty = load_train(data_dir=DATA_DIR)
     df_all = merge_faults(df_ff, df_faulty)
-    scaler = fit_scaler(METHOD, SCALING, DATA_DIR)
+    scaler = fit_scaler(DATA_DIR) if needs_scaler(METHOD, SCALING) else None
     per_run = run_spectra(df_all, METHOD, scaling_mode=SCALING,
                           scaler=scaler, dyca_m=2, dyca_n=4)
     agg = aggregate(per_run, METHOD)
@@ -35,9 +35,10 @@ Spaltennamen, Cutoffs und die Vorverarbeitung kommen aus `tep.core` und
 werden mit `tep.tsfresh` geteilt.
 """
 
-from ..core import LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS
+from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
+                    fit_scaler)
 from .aggregate import aggregate, export, value_columns
-from .data import faultfree_by_run, fit_scaler, load_train, merge_faults
+from .data import faultfree_by_run, load_train, merge_faults
 from .plots import (plot_bars, plot_cv, plot_dyca_mn_estimate, plot_means,
                     plot_scalar, plot_stds, transform)
 from .spectra import (SPECTRA, csv_name, get, label, min_samples,

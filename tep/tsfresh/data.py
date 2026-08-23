@@ -13,20 +13,6 @@ import numpy as np
 import pandas as pd
 
 from ..core import META_COLS, PRE_FAULT_CUTOFF, PROC_COLS, SPLIT_FILES
-from ..core import fit_scaler as _core_fit_scaler
-
-
-def fit_scaler(scaling_mode: str = "global_mean", data_dir: str = ".",
-               verbose: bool = True):
-    """StandardScaler auf dem Normalbetrieb fitten - oder None.
-
-    Nur bei scaling_mode="scaler" noetig; sonst bleiben die 250k Zeilen
-    Normalbetrieb ungelesen.
-    """
-    if scaling_mode != "scaler":
-        return None
-    return _core_fit_scaler(
-        os.path.join(data_dir, "TEP_FaultFree_Training.csv"), verbose)
 
 
 def load_runs(split: str, data_dir: str = ".",
