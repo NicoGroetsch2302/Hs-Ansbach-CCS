@@ -40,7 +40,7 @@ werden mit `tep.eigen` geteilt.
 """
 
 from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
-                    SPLIT_FILES, labels_from_index, run_id, versions)
+                    SPLIT_FILES, labels_from_index, run_id)
 from .confusion import best, confusion, names, recall_table
 from .confusion import plot_detail as plot_confusion_detail
 from .confusion import plot_grid as plot_confusion_grid
@@ -64,5 +64,4 @@ __all__ = [
     "compare", "plot_comparison",
     "confusion", "names", "best", "recall_table",
     "plot_confusion_grid", "plot_confusion_detail", "plot_recall",
-    "versions",
 ]

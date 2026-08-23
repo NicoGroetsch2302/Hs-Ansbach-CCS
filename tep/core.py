@@ -184,19 +184,4 @@ def default_estimator(random_state: int = 42):
         RandomForestClassifier(random_state=random_state, n_jobs=-1))
 
 
-# =========================================================================
-# Umgebung
-# =========================================================================
 
-def versions() -> str:
-    """Eine Zeile mit den Versionen, die das Ergebnis beeinflussen."""
-    import sklearn
-    parts = [f"pandas {pd.__version__}", f"numpy {np.__version__}",
-             f"sklearn {sklearn.__version__}"]
-    try:
-        import tsfresh
-        parts.insert(0, f"tsfresh {tsfresh.__version__}")
-    except ImportError:
-        pass
-    parts.append(f"Kerne: {os.cpu_count()}")
-    return " | ".join(parts)

@@ -35,7 +35,7 @@ Spaltennamen, Cutoffs und die Vorverarbeitung kommen aus `tep.core` und
 werden mit `tep.tsfresh` geteilt.
 """
 
-from ..core import LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS, versions
+from ..core import LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS
 from .aggregate import aggregate, export, value_columns
 from .data import faultfree_by_run, fit_scaler, load_train, merge_faults
 from .plots import (plot_bars, plot_cv, plot_dyca_mn_estimate, plot_means,
@@ -50,5 +50,5 @@ __all__ = [
     "aggregate", "export", "value_columns",
     "plot_means", "plot_stds", "plot_cv", "plot_bars",
     "plot_scalar", "plot_dyca_mn_estimate", "transform",
-    "PROC_COLS", "META_COLS", "PRE_FAULT_CUTOFF", "LABELS", "versions",
+    "PROC_COLS", "META_COLS", "PRE_FAULT_CUTOFF", "LABELS",
 ]
