@@ -23,12 +23,25 @@ python main.py eigen tsfresh      # nur diese Stufen
 python main.py -p probe.yaml      # andere Parameterdatei
 ```
 
+Zwei Klassifikationswege, je eine Stufe:
+
 | Stufe | was sie tut |
 |---|---|
-| `eigen` | Spektrum je (Fault, Run), Aggregation, vier Standardplots je Verfahren |
-| `amplitudes` | niedrigdimensionale Amplituden y(t) je Lauf als NPZ |
-| `classify` | Klassifikation **auf** den Spektren + Confusion-Matrizen |
-| `tsfresh` | die drei Schritte, Konfigurationsvergleich, Confusion-Matrizen |
+| `eigen` | Spektrum je (Fault, Run) → Plots → Klassifikation **auf** den Spektren |
+| `tsfresh` | Projektion → TSFresh-Merkmale → Modellvergleich → Confusion-Matrizen |
+
+`eigen.classify_methods: []` lässt den Klassifikationsteil weg, dann wird nur
+charakterisiert. Beide Stufen zusammen sind kein Widerspruch, nur zwei
+Experimente in einem Lauf.
+
+Dazu eine Stufe, die zu **keinem** der beiden Wege gehört:
+
+| Stufe | was sie tut |
+|---|---|
+| `amplitudes` | exportiert die Amplituden y(t) je Lauf als NPZ, zum Anschauen |
+
+Die NPZ wird von nichts wieder eingelesen — `tsfresh` rechnet seine
+Projektionen selbst.
 
 Bilder landen in `plots/`. Zwischenergebnisse werden nicht neu gerechnet, wenn
 sie schon auf Platte liegen (Spektren-CSVs, NPZ, TSFresh-Chunks, `summary`- und

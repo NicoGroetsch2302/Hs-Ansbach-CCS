@@ -5,12 +5,16 @@
     python main.py eigen tsfresh        nur diese Stufen
     python main.py -p probe.yaml        andere Parameterdatei
 
-Stufen
-------
-eigen       Spektrum je (Fault, Run), Aggregation, die vier Standardplots
-amplitudes  niedrigdimensionale Amplituden y(t) je Lauf als NPZ
-classify    Klassifikation AUF den Spektren + Confusion-Matrizen
-tsfresh     Merkmale waehlen/anwenden, Modelle vergleichen, Matrizen
+Zwei Klassifikationswege, je eine Stufe:
+
+eigen       Spektrum je (Fault, Run) -> Plots -> Klassifikation darauf
+tsfresh     Projektion -> TSFresh-Merkmale -> Modellvergleich
+
+Dazu eine Stufe, die zu KEINEM der beiden Wege gehoert:
+
+amplitudes  exportiert die Amplituden y(t) je Lauf als NPZ, zum
+            Anschauen und Weiterverarbeiten. tsfresh rechnet seine
+            Projektionen selbst - die NPZ wird davon nicht gelesen.
 
 Zwischenergebnisse werden nicht neu gerechnet, wenn sie schon auf Platte
 liegen (Spektren-CSVs, NPZ, TSFresh-Chunks, summary- und Vorhersage-CSV).
@@ -19,7 +23,6 @@ Neu rechnen heisst: die betreffende Datei loeschen.
 
 import argparse
 import os
-import sys
 
 import matplotlib
 matplotlib.use("Agg")            # vor pyplot: keine Fenster, kein Display
@@ -30,8 +33,7 @@ import yaml                      # noqa: E402
 
 from tep.eigen import (aggregate, csv_name, export, faultfree_by_run,  # noqa
                        get, load_train, merge_faults, plot_bars, plot_cv,
-                       plot_means, plot_scalar, plot_stds, run_spectra,
-                       versions)
+                       plot_means, plot_scalar, plot_stds, run_spectra)
 from tep.eigen import fit_scaler as eigen_scaler                       # noqa
 from tep.eigen.classify import (class_distribution, confusion,         # noqa
                                 feature_sets, plot_confusions,
@@ -63,7 +65,7 @@ def save(fig, name):
 # =========================================================================
 
 def stage_eigen():
-    """Spektren je Verfahren, plus die vier Standardplots."""
+    """Weg 1: Spektren je Verfahren, Plots, Klassifikation darauf."""
     e = P["eigen"]
     df_ff = df_all = None                 # erst lesen, wenn wirklich noetig
 
@@ -97,6 +99,9 @@ def stage_eigen():
                      f"eigen_{method}_{tag}")
             save(plot_bars(agg, method, e["k_bar"], e["ncols"]),
                  f"eigen_{method}_balken")
+
+    if e["classify_methods"]:
+        _classify_spectra(e)
 
 
 def stage_amplitudes():
@@ -145,13 +150,18 @@ def _npz(name, split):
     return os.path.join(P["data_dir"], f"amplitudes.{name}.{split}.npz")
 
 
-def stage_classify():
-    """Klassifikation auf den exportierten Spektren."""
-    c = P["classify"]
-    train = train_spectra(c["methods"], P["scaling_mode"], P["data_dir"])
-    test = test_spectra(c["methods"], P["scaling_mode"], P["data_dir"],
-                        P["runs_per_fault"], **P["eigen"]["params"])
-    sets = feature_sets(c["methods"], train, test, combine=True)
+def _classify_spectra(e):
+    """Klassifikation AUF den Spektren - Abschluss des Eigenwert-Wegs.
+
+    Keine eigene Stufe: sie liest die CSVs, die oben geschrieben wurden,
+    und laeuft ohne sie nicht. Leere classify_methods = nur
+    charakterisieren, nicht klassifizieren.
+    """
+    methods = e["classify_methods"]
+    train = train_spectra(methods, P["scaling_mode"], P["data_dir"])
+    test = test_spectra(methods, P["scaling_mode"], P["data_dir"],
+                        P["runs_per_fault"], **e["params"])
+    sets = feature_sets(methods, train, test, combine=True)
     for s in sets:
         print(f"  {s['name']:12s} {len(s['cols']):3d} Merkmale | "
               f"train {s['train'].shape} test {s['test'].shape}")
@@ -164,13 +174,13 @@ def stage_classify():
     else:
         rows = [b.assign(Merkmalssatz=s["name"], Modell=b.index)
                 for s in sets
-                for b in [run_lazyclassifier(s, c["cv_folds"],
-                                             c["select_metric"],
-                                             c["random_state"])]]
+                for b in [run_lazyclassifier(s, e["cv_folds"],
+                                             e["select_metric"],
+                                             e["random_state"])]]
         pd.concat(rows).to_csv(board, index=False)
         print(f"  Leaderboards -> {board}")
 
-    results = confusion(sets, c["random_state"])
+    results = confusion(sets, e["random_state"])
     save(plot_confusions(results), "spektren_confusion")
     report_confusions(results)
 
@@ -218,13 +228,16 @@ def stage_tsfresh():
     save(plot_recall(cm)[0], "tsfresh_recall")
 
 
-STAGES = {"eigen": stage_eigen, "amplitudes": stage_amplitudes,
-          "classify": stage_classify, "tsfresh": stage_tsfresh}
+def print_params(params):
+    """Print the parameters in a readable format."""
+    print("Parameters:")
+    for key, value in params.items():
+        print(f"  {key}: {value}")
 
 
-# =========================================================================
-# Einstieg
-# =========================================================================
+STAGES = {"eigen": stage_eigen, "tsfresh": stage_tsfresh,
+          "amplitudes": stage_amplitudes}
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -234,9 +247,9 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     P = yaml.safe_load(open(args.params, encoding="utf-8"))
+    print_params(P)
     os.makedirs(P["plot_dir"], exist_ok=True)
 
-    print(versions())
     for name in (args.stages or P["stages"]):
         print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
         STAGES[name]()

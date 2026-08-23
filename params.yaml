@@ -9,7 +9,10 @@ scaling_mode: global_mean   # global_mean | scaler  (LDA erzwingt scaler)
 runs_per_fault: null        # null = alle 500 Runs je Fault; 3 = Probelauf
 plot_dir: plots             # hierhin die PNGs
 
-stages: [eigen, amplitudes, classify, tsfresh]
+# Zwei Klassifikationswege - eigen ODER tsfresh; beide zusammen sind
+# zwei Experimente in einem Lauf, kein Widerspruch, nur teurer.
+# amplitudes gehoert zu keinem von beiden (reiner NPZ-Export).
+stages: [eigen, tsfresh]
 
 
 # --- Verfahrensparameter der Projektionen (amplitudes UND tsfresh) -------
@@ -44,8 +47,19 @@ eigen:
   plot_mode: linear         # linear | log | relative
   ncols: 6                  # Subplots je Zeile
 
+  # Abschluss des Wegs: Klassifikation AUF den Spektren. Keine eigene
+  # Stufe, denn sie liest die CSVs von oben und laeuft ohne sie nicht.
+  # Leere Liste = nur charakterisieren (Plots), nicht klassifizieren.
+  classify_methods: [pca, dyca]   # Teilmenge von methods
+  cv_folds: 5
+  select_metric: Balanced Accuracy CV Mean
+  random_state: 42
+
 
 # --- Stufe "amplitudes": y(t) je Lauf als NPZ ----------------------------
+# Gehoert zu KEINEM der beiden Klassifikationswege: die NPZ wird von
+# nichts wieder eingelesen, tsfresh rechnet seine Projektionen selbst.
+# Nur zum Anschauen und Weiterverarbeiten der Amplituden.
 amplitudes:
   configs:                  # [Verfahren, ...Parameter]
     - [dyca, 6, 12]         # (m, n)
@@ -57,13 +71,6 @@ amplitudes:
   splits: [train]           # train | test
   run_length: 480           # gemeinsame Laenge je Lauf; null = ungekuerzt
 
-
-# --- Stufe "classify": Klassifikation AUF den Spektren -------------------
-classify:
-  methods: [pca, dyca]      # muessen zu eigen.params passen
-  cv_folds: 5
-  select_metric: Balanced Accuracy CV Mean
-  random_state: 42
 
 
 # --- Stufe "tsfresh": Phase A/B/C ----------------------------------------

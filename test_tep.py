@@ -154,8 +154,14 @@ def test_params_yaml():
     known = set(inspect.signature(run_spectra).parameters)
     for key in p["eigen"]["params"]:
         assert key in known, f"eigen.params: run_spectra kennt '{key}' nicht"
-    for method in p["eigen"]["methods"] + p["classify"]["methods"]:
+    for method in p["eigen"]["methods"]:
         get(method)                      # wirft bei unbekanntem Verfahren
+
+    # Klassifiziert wird auf den CSVs, die derselbe Lauf schreibt - was
+    # nicht in methods steht, hat keine CSV und wuerde erst zur Laufzeit
+    # als FileNotFoundError auffallen.
+    fehlt = set(p["eigen"]["classify_methods"]) - set(p["eigen"]["methods"])
+    assert not fehlt, f"classify_methods ohne Spektrum: {sorted(fehlt)}"
 
     # proj_params gegen die apply-Funktionen pruefen, nicht gegen project():
     # das hat **params und wuerde jeden Tippfehler stillschweigend schlucken.
