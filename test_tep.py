@@ -267,6 +267,16 @@ def test_extract_config_lehnt_stille_fallen_ab():
             raise AssertionError(f"{kwargs} haette scheitern muessen")
 
 
+def test_fit_scaler_wird_gemerkt():
+    """Der Fit liest 94 MB; die eigen-Stufe ruft ihn je Verfahren auf.
+    Einmal pro Prozess reicht - das Ergebnis ist nach dem Fit fest."""
+    from tep.core import fit_scaler
+
+    assert hasattr(fit_scaler, "cache_info"), "lru_cache verschwunden?"
+    fit_scaler.cache_clear()
+    assert fit_scaler.cache_info().currsize == 0
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

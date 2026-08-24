@@ -13,6 +13,7 @@ unbemerkt auf verschiedenen Daten.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -62,6 +63,7 @@ def labels_from_index(index) -> pd.Series:
 # Vorverarbeitung
 # =========================================================================
 
+@lru_cache(maxsize=None)
 def fit_scaler(data_dir: str = ".", verbose: bool = True):
     """StandardScaler auf TEP_FaultFree_Training (Normalbetrieb) fitten.
 
@@ -72,6 +74,13 @@ def fit_scaler(data_dir: str = ".", verbose: bool = True):
     Aufrufer und steht dort auch sichtbar: bei tep.eigen ueber
     needs_scaler(method, mode) - LDA erzwingt den Scaler -, bei
     tep.tsfresh ueber scaling_mode == "scaler".
+
+    Gemerkt (lru_cache): der Fit liest 94 MB und dauert ~0,9 s, und die
+    eigen-Stufe ruft ihn je Verfahren auf. Das Ergebnis ist 832 Byte
+    gross und nach dem Fit unveraenderlich, wird also je Prozess
+    einmal gerechnet und geteilt. Ein Cache auf Platte waere das
+    nicht wert. (verbose gehoert zum Schluessel - wer mit beiden
+    Werten aufruft, fittet zweimal.)
     """
 
     if verbose:
