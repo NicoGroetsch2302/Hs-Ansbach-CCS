@@ -22,6 +22,7 @@ Ein Eintrag in SPECTRA hat die Schluessel:
                     (Wertevektor, extras-dict)
     scalar          True, wenn EINE Zahl je Run herauskommt (nur LDA)
     forced_scaling  erzwingt einen Skalierungsmodus (LDA: "scaler")
+    needs_reference True, wenn apply() ff_by_run braucht (nur LDA)
     extra_cols      zusaetzliche Spalten aus dem extras-dict (ICA)
 
 Die letzten drei sind optional; wer sie nicht setzt, bekommt den Default
@@ -166,7 +167,8 @@ SPECTRA = {
     # genau das Signal, waere dann verfaelscht.
     "lda": {"prefix": "lda_eigenvalue", "label": "LDA",
             "csv_stem": "lda_eigenvalues", "apply": _apply_lda,
-            "scalar": True, "forced_scaling": "scaler"},
+            "scalar": True, "forced_scaling": "scaler",
+            "needs_reference": True},
 }
 
 
@@ -188,6 +190,17 @@ def prefix(method: str) -> str:
     return get(method)["prefix"]
 
 
+def effective_mode(method: str, scaling_mode: str = "global_mean") -> str:
+    """Der TATSAECHLICH verwendete Skalierungsmodus.
+
+    LDA erzwingt "scaler" (forced_scaling). Wer den Modus selbst
+    herleitet, kann von run_spectra abweichen - dann liegt bei LDA die
+    Referenzwolke in Rohwerten und der Fehlerlauf in z-Werten, und jeder
+    Eigenwert ist bedeutungslos, ohne dass etwas auffaellt.
+    """
+    return get(method).get("forced_scaling") or scaling_mode
+
+
 def needs_scaler(method: str, scaling_mode: str = "global_mean") -> bool:
     """Ob ein StandardScaler gefittet werden muss: bei
     scaling_mode="scaler" und immer bei LDA (das Verfahren erzwingt ihn)."""
@@ -196,7 +209,8 @@ def needs_scaler(method: str, scaling_mode: str = "global_mean") -> bool:
 
 
 def csv_name(method: str, scaling_mode: str = "global_mean",
-             split: str = "train") -> str:
+             split: str = "train",
+             runs_per_fault: int | None = None) -> str:
     """Dateiname der Export-CSV.
 
     Die Namen sind eingefroren - `LazyClassifier_PCA_DyCA` liest sie. Der
@@ -206,9 +220,16 @@ def csv_name(method: str, scaling_mode: str = "global_mean",
     Massgeblich ist der TATSAECHLICH verwendete Modus: LDA erzwingt
     "scaler" (siehe forced_scaling), seine Datei traegt deshalb immer das
     Suffix - sonst hiesse eine Datei mit Scaler-Daten wie eine ohne.
+
+    runs_per_fault gehoert ebenfalls in den Namen: sonst liest ein
+    Probelauf die CSV des Volllaufs (und haelt 10 500 Runs fuer 3), oder
+    der Probelauf ueberschreibt sie und jeder spaetere Volllauf rechnet
+    stillschweigend auf 3 Runs weiter.
     """
-    mode = get(method).get("forced_scaling") or scaling_mode
+    mode = effective_mode(method, scaling_mode)
     suffix = "" if mode == "global_mean" else "_scaler"
+    if runs_per_fault is not None:
+        suffix += f"_r{runs_per_fault}"
     return f"{get(method)['csv_stem']}_{split}{suffix}.csv"
 
 
@@ -252,11 +273,17 @@ def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
     """
     spec = get(method)
     name = spec["label"]
-    mode = spec.get("forced_scaling") or scaling_mode
+    mode = effective_mode(method, scaling_mode)
     if spec.get("forced_scaling") and scaling_mode != spec["forced_scaling"]:
         print(f"Hinweis: {name} arbeitet immer auf "
               f"scaling_mode='{spec['forced_scaling']}' "
               f"(uebergeben wurde '{scaling_mode}').")
+
+    if spec.get("needs_reference") and not ff_by_run:
+        raise ValueError(
+            f"{name} vergleicht jeden Lauf gegen einen Normalbetriebslauf "
+            f"-> ff_by_run wird gebraucht (faultfree_by_run(...)). Ohne "
+            f"scheitert jeder einzelne Run.")
 
     params = dict(dyca_m=dyca_m, dyca_n=dyca_n, dpca_lags=dpca_lags,
                   cva_past=cva_past, cva_fut=cva_fut, ridge_rel=ridge_rel,

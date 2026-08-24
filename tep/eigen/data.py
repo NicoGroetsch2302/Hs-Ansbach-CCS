@@ -70,16 +70,30 @@ def merge_faults(df_ff, df_faulty, verbose: bool = True):
     return df_all
 
 
-def faultfree_by_run(df_ff, scaling_mode: str = "scaler",
-                     scaler=None) -> dict:
+def faultfree_by_run(df_ff, method: str = "lda",
+                     scaling_mode: str = "global_mean", scaler=None,
+                     head: int | None = None) -> dict:
     """Pro FaultFree-Lauf die vorverarbeitete Messmatrix.
 
     Nur LDA braucht das: dort wird jeder Fehlerlauf gegen einen
     Normalbetriebslauf gestellt, und dessen Matrix soll nicht in jeder
     Iteration neu skaliert werden.
+
+    Der Modus wird NICHT vom Aufrufer uebernommen, sondern ueber
+    effective_mode(method, scaling_mode) hergeleitet - genau wie in
+    run_spectra. Sonst koennen die beiden Haelften des Vergleichs in
+    verschiedenen Einheiten liegen (siehe effective_mode).
+
+    head kuerzt jeden Referenzlauf auf so viele Samples - im Testsplit
+    noetig, damit die Fenster zum Training passen.
     """
+    from .spectra import effective_mode
+
+    mode = effective_mode(method, scaling_mode)
     out = {}
     for run, g in df_ff.groupby("simulationRun"):
         g = g.sort_values("sample")
-        out[int(run)] = scale(g[PROC_COLS].values, scaling_mode, scaler)
+        if head is not None:
+            g = g.head(head)
+        out[int(run)] = scale(g[PROC_COLS].values, mode, scaler)
     return out

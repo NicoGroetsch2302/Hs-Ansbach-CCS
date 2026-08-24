@@ -27,6 +27,7 @@ from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
                     default_estimator, fit_scaler)
 from ..plotting import (counts_frame, normalize_rows, plot_grid,
                         print_top_confusions)
+from .data import faultfree_by_run
 from .spectra import csv_name, get, needs_scaler, run_spectra
 
 KEYS = ["faultNumber", "simulationRun"]
@@ -57,7 +58,8 @@ def test_spectra(methods, scaling_mode: str = "global_mean",
     """
     out, todo = {}, []
     for method in methods:
-        path = os.path.join(data_dir, csv_name(method, scaling_mode, "test"))
+        path = os.path.join(
+            data_dir, csv_name(method, scaling_mode, "test", runs_per_fault))
         if os.path.exists(path):
             out[method] = pd.read_csv(path)
             if verbose:
@@ -88,15 +90,27 @@ def test_spectra(methods, scaling_mode: str = "global_mean",
         if verbose:
             print("Test-Rohdaten:", test_all.shape)
 
+        # LDA stellt jeden Lauf gegen einen Normalbetriebslauf. Auf dem
+        # Testsplit sind das die FaultFree-TESTlaeufe, mit derselben
+        # Fensterkuerzung wie die Fault-0-Gruppe in run_spectra.
+        ff_by_run = {}
+        if any(get(m).get("needs_reference") for m in todo):
+            ff_by_run = faultfree_by_run(
+                test_all[test_all["faultNumber"] == 0], "lda",
+                scaling_mode, scaler, head=TEST_HEAD_FAULT0)
+            if verbose:
+                print(f"FaultFree-Referenzlaeufe (Test): {len(ff_by_run)}")
+
         for method in todo:
             df = run_spectra(test_all, method, scaling_mode=scaling_mode,
-                             scaler=scaler,
+                             scaler=scaler, ff_by_run=ff_by_run,
                              pre_fault_cutoff=PRE_FAULT_CUTOFF["test"],
                              head_fault0=TEST_HEAD_FAULT0,
                              head_faulty=TEST_HEAD_FAULTY,
                              verbose=verbose, **params)
-            path = os.path.join(data_dir,
-                                csv_name(method, scaling_mode, "test"))
+            path = os.path.join(
+                data_dir,
+                csv_name(method, scaling_mode, "test", runs_per_fault))
             df.to_csv(path, index=False)
             out[method] = df
             if verbose:
@@ -108,11 +122,14 @@ def test_spectra(methods, scaling_mode: str = "global_mean",
 
 
 def train_spectra(methods, scaling_mode: str = "global_mean",
-                  data_dir: str = ".", verbose: bool = True) -> dict:
+                  data_dir: str = ".", runs_per_fault: int | None = None,
+                  verbose: bool = True) -> dict:
     """Die von den Eigenwert-Notebooks exportierten Trainings-CSVs laden."""
     out = {}
     for method in methods:
-        path = os.path.join(data_dir, csv_name(method, scaling_mode, "train"))
+        path = os.path.join(
+            data_dir,
+            csv_name(method, scaling_mode, "train", runs_per_fault))
         label = get(method)["label"]
         if not os.path.exists(path):
             raise FileNotFoundError(

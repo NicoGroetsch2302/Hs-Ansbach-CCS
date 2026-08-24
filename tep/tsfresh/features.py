@@ -44,7 +44,8 @@ def fc_parameters(fc_mode: str = "efficient") -> dict:
 
 
 def cache_dir(scaling_mode: str = "global_mean",
-              smoke_test: bool = False) -> str:
+              smoke_test: bool = False,
+              runs_per_fault: int | None = None) -> str:
     """Cache-Ordner, angelegt falls noetig.
 
     Der Ordner ist BEWUSST zwischen den Notebooks geteilt - die
@@ -55,6 +56,11 @@ def cache_dir(scaling_mode: str = "global_mean",
     path = "tsfresh_cache_smoke" if smoke_test else "tsfresh_cache"
     if scaling_mode != "global_mean":
         path += f"_{scaling_mode}"
+    # runs_per_fault MUSS in den Ordnernamen: die Chunk-Dateien heissen
+    # nur nach Index, ein Probelauf wuerde sonst die Chunks des
+    # Volllaufs lesen - und seine eigenen darin hinterlassen.
+    if runs_per_fault is not None:
+        path += f"_r{runs_per_fault}"
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -117,6 +123,21 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
 
     Rueckgabe: DataFrame, Index = run_id, Spalten = Featurenamen (float32).
     """
+    # tsfresh liest default_fc_parameters=None UND kind_to_fc=None als
+    # ComprehensiveFCParameters (~1500 Spalten je Kanal) - und schreibt
+    # das in dieselben "__full__"-Chunks, die ein efficient-Lauf spaeter
+    # wiederverwendet. Ein leeres kind_to_fc extrahiert umgekehrt gar
+    # nichts. Beides faellt sonst erst an den Spaltenzahlen auf.
+    if kind_to_fc is None and fc_params is None:
+        raise ValueError(
+            "fc_params fehlt - tsfresh nimmt sonst den COMPREHENSIVE-Satz. "
+            "fc_parameters(fc_mode) uebergeben.")
+    if kind_to_fc is not None and not kind_to_fc:
+        raise ValueError(
+            "kind_to_fc ist leer - daraus extrahiert tsfresh keine einzige "
+            "Spalte. Kommt von from_columns([]), also einer leeren "
+            "Merkmalsauswahl.")
+
     name = config_name(spec)
     keys = sorted(runs.keys())
     parts, n_failed = [], 0

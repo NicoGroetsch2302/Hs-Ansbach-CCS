@@ -181,6 +181,92 @@ def test_params_yaml():
     assert p["tsfresh"]["fc_mode"] in ("minimal", "efficient", "comprehensive")
 
 
+def test_cache_namen_trennen_probelauf():
+    """runs_per_fault MUSS in Dateinamen und Cache-Ordner stehen - sonst
+    liest ein Probelauf die Ergebnisse des Volllaufs und umgekehrt."""
+    from tep.eigen.spectra import csv_name
+    from tep.tsfresh.features import cache_dir
+
+    assert csv_name("pca") == "pca_eigenvalues_train.csv"
+    assert csv_name("pca", runs_per_fault=3) == "pca_eigenvalues_train_r3.csv"
+    assert (csv_name("pca", "scaler", "test", 3)
+            == "pca_eigenvalues_test_scaler_r3.csv")
+    # Volllauf und Probelauf duerfen nie denselben Ordner treffen
+    voll = cache_dir("global_mean", False, None)
+    probe = cache_dir("global_mean", False, 3)
+    assert voll != probe, (voll, probe)
+    assert probe.endswith("_r3"), probe
+
+
+def test_notebooks_entpacken_plot_recall():
+    """plot_recall liefert (fig, tab). Wer nur `tab` erwartet, bekommt ein
+    Tupel und scheitert erst in der letzten Zelle nach Stunden."""
+    import glob
+    import inspect
+    import json
+
+    from tep.tsfresh import plot_recall
+
+    src = inspect.getsource(plot_recall)
+    assert "return fig, tab" in src, "Rueckgabe geaendert?"
+    for p in sorted(glob.glob("notebooks/*.ipynb")):
+        for cell in json.load(open(p, encoding="utf-8"))["cells"]:
+            for line in "".join(cell["source"]).splitlines():
+                if "plot_recall(" in line and "=" in line:
+                    assert line.strip().startswith("_,"), f"{p}: {line.strip()}"
+
+
+def test_effective_mode_und_referenz():
+    """LDA erzwingt scaler - beide Haelften des Vergleichs muessen denselben
+    Modus benutzen, sonst liegt die Referenz in Rohwerten und der
+    Fehlerlauf in z-Werten und jeder Eigenwert ist bedeutungslos."""
+    import numpy as np
+    import pandas as pd
+    from sklearn.preprocessing import StandardScaler
+
+    from tep.core import PROC_COLS
+    from tep.eigen import faultfree_by_run, run_spectra
+    from tep.eigen.spectra import effective_mode
+
+    assert effective_mode("pca", "global_mean") == "global_mean"
+    assert effective_mode("pca", "scaler") == "scaler"
+    assert effective_mode("lda", "global_mean") == "scaler"
+
+    rng = np.random.default_rng(0)
+    T = 40
+    d = {"faultNumber": 0, "simulationRun": 1, "sample": np.arange(1, T + 1)}
+    d.update({c: rng.normal(loc=17.0, size=T) for c in PROC_COLS})
+    df = pd.DataFrame(d)
+    sc = StandardScaler().fit(df[PROC_COLS].values)
+    # Aufrufer sagt global_mean, LDA erzwingt scaler -> z-skaliert
+    ff = faultfree_by_run(df, "lda", "global_mean", sc)
+    assert np.allclose(ff[1].std(axis=0), 1.0, atol=0.1), ff[1].std(axis=0)[:3]
+
+    # ohne Referenzlaeufe frueh scheitern, statt 10 500 mal einzeln
+    try:
+        run_spectra(df, "lda", pre_fault_cutoff=1, verbose=False)
+    except ValueError as exc:
+        assert "ff_by_run" in str(exc)
+    else:
+        raise AssertionError("LDA ohne ff_by_run haette scheitern muessen")
+
+
+def test_extract_config_lehnt_stille_fallen_ab():
+    """default_fc_parameters=None heisst bei tsfresh COMPREHENSIVE, ein
+    leeres kind_to_fc extrahiert gar nichts - beides faellt sonst erst an
+    den Spaltenzahlen auf."""
+    from tep.tsfresh import extract_config
+
+    for kwargs, stichwort in [({}, "COMPREHENSIVE"),
+                              ({"kind_to_fc": {}}, "leer")]:
+        try:
+            extract_config(("raw",), "train", {}, "cache", **kwargs)
+        except ValueError as exc:
+            assert stichwort in str(exc), str(exc)
+        else:
+            raise AssertionError(f"{kwargs} haette scheitern muessen")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

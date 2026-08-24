@@ -43,6 +43,7 @@ def aggregate(per_run: pd.DataFrame, method: str,
 
 def export(per_run: pd.DataFrame, method: str,
            scaling_mode: str = "global_mean", data_dir: str = ".",
+           runs_per_fault: int | None = None,
            verbose: bool = True) -> str:
     """Schreibt die Trainings-Spektren als CSV zu den TEP-Daten.
 
@@ -50,7 +51,8 @@ def export(per_run: pd.DataFrame, method: str,
     werden bewusst NICHT hier berechnet, sondern erst im
     Klassifikations-Notebook - dieses Notebook bleibt training-only.
     """
-    path = os.path.join(data_dir, csv_name(method, scaling_mode, "train"))
+    path = os.path.join(
+        data_dir, csv_name(method, scaling_mode, "train", runs_per_fault))
     per_run.to_csv(path, index=False)
     if verbose:
         print(f"{get(method)['label']}-Train gespeichert: {per_run.shape} "

@@ -23,6 +23,7 @@ Neu rechnen heisst: die betreffende Datei loeschen.
 
 import argparse
 import os
+import re
 
 import matplotlib
 matplotlib.use("Agg")            # vor pyplot: keine Fenster, kein Display
@@ -53,7 +54,8 @@ def save(fig, name):
     figs = fig if isinstance(fig, tuple) else (fig,)
     for i, f in enumerate(figs, start=1):
         suffix = "" if len(figs) == 1 else f"_{i}"
-        path = os.path.join(Parameters["plot_dir"], f"{name}{suffix}.png")
+        path = os.path.join(Parameters["plot_dir"],
+                            f"{name}{_probe_suffix()}{suffix}.png")
         f.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(f)
         print(f"    Bild: {path}")
@@ -69,8 +71,10 @@ def stage_eigen():
     df_ff = df_all = None                 # erst lesen, wenn wirklich noetig
 
     for method in eigen_params["methods"]:
-        path = os.path.join(Parameters["data_dir"],
-                            csv_name(method, Parameters["scaling_mode"], "train"))
+        path = os.path.join(
+            Parameters["data_dir"],
+            csv_name(method, Parameters["scaling_mode"], "train",
+                     Parameters["runs_per_fault"]))
         if os.path.exists(path):
             per_run = pd.read_csv(path)
             print(f"  {method}: {per_run.shape} aus {path}")
@@ -84,11 +88,13 @@ def stage_eigen():
                       else None) # TODO: es wird skaliert vor der Berechnung der Eigenwerte
             kw = dict(eigen_params["params"])
             if method == "lda":           # Lauf gegen Normalbetrieb
-                kw["ff_by_run"] = faultfree_by_run(df_ff, "scaler", scaler)
+                kw["ff_by_run"] = faultfree_by_run(
+                    df_ff, method, Parameters["scaling_mode"], scaler)
             per_run = run_spectra(df_all, method,
                                   scaling_mode=Parameters["scaling_mode"],
                                   scaler=scaler, **kw)
-            export(per_run, method, Parameters["scaling_mode"], Parameters["data_dir"])
+            export(per_run, method, Parameters["scaling_mode"],
+                   Parameters["data_dir"], Parameters["runs_per_fault"])
 
         agg = aggregate(per_run, method)
         if get(method).get("scalar"):     # LDA: eine Zahl je Lauf
@@ -148,8 +154,24 @@ def stage_amplitudes():
                   f"{n_failed} Fehler)")
 
 
+def _probe_suffix():
+    """Was diesen Lauf von einem anderen unterscheidet.
+
+    Gehoert in jeden erzeugten Dateinamen: sonst ueberschreibt ein
+    scaler-Lauf die Bilder des global_mean-Laufs und ein Probelauf die
+    des Volllaufs, waehrend die CSVs daneben korrekt getrennt liegen.
+    """
+    parts = []
+    if Parameters["scaling_mode"] != "global_mean":
+        parts.append(Parameters["scaling_mode"])
+    if Parameters["runs_per_fault"] is not None:
+        parts.append(f"r{Parameters['runs_per_fault']}")
+    return "".join(f"_{p}" for p in parts)
+
+
 def _npz(name, split):
-    return os.path.join(Parameters["data_dir"], f"amplitudes.{name}.{split}.npz")
+    return os.path.join(Parameters["data_dir"],
+                        f"amplitudes.{name}.{split}{_probe_suffix()}.npz")
 
 
 def _classify_spectra(e):
@@ -160,7 +182,9 @@ def _classify_spectra(e):
     charakterisieren, nicht klassifizieren.
     """
     methods = e["classify_methods"]
-    train = train_spectra(methods, Parameters["scaling_mode"], Parameters["data_dir"])
+    train = train_spectra(methods, Parameters["scaling_mode"],
+                          Parameters["data_dir"],
+                          Parameters["runs_per_fault"])
     test = test_spectra(methods, Parameters["scaling_mode"], Parameters["data_dir"],
                         Parameters["runs_per_fault"], **e["params"])
     sets = feature_sets(methods, train, test, combine=True)
@@ -170,9 +194,14 @@ def _classify_spectra(e):
 
     print(class_distribution(sets).to_string())
 
-    board = os.path.join(Parameters["data_dir"], "spektren_leaderboards.csv")
+    board = os.path.join(Parameters["data_dir"],
+                         f"spektren_leaderboards{_probe_suffix()}.csv")
     if os.path.exists(board):
-        print(f"  Leaderboards aus {board}")
+        # Wirklich laden, nicht nur melden - sonst faellt der
+        # Modellvergleich stillschweigend ganz aus.
+        boards = pd.read_csv(board)
+        print(f"  Leaderboards aus {board}: {boards.shape[0]} Zeilen, "
+              f"{boards['Merkmalssatz'].nunique()} Merkmalssaetze")
     else:
         rows = [b.assign(Merkmalssatz=s["name"], Modell=b.index)
                 for s in sets
@@ -189,16 +218,29 @@ def _classify_spectra(e):
 
 def stage_tsfresh():
     """Merkmalsauswahl, -anwendung, Modellvergleich plus Plots."""
-    t = Parameters["tsfresh"]
+    t = dict(Parameters["tsfresh"])
+    runs_per_fault = Parameters["runs_per_fault"]
+    if t["smoke_test"]:
+        # Wie frueher PipelineConfig.__post_init__: der Probelauf muss
+        # den Umfang schrumpfen, sonst ist er langsamer als der echte
+        # Lauf (leerer Cache, aber voller Umfang).
+        t.update(fc_mode="minimal", top_k=20, chunk_runs=50)
+        runs_per_fault = 4
+        print("  smoke_test: runs_per_fault=4, fc_mode=minimal, "
+              "top_k=20, chunk_runs=50")
+    # label identifiziert die Notebook-Familie (PCA/DyCA, DPCA/CVA/ICA,
+    # DyCVDA) - ohne sie im Bildnamen ueberschreiben sich die Laeufe.
+    family = re.sub(r"[^a-z0-9]+", "_", t["label"].lower()).strip("_")
     configs = [tuple(x) for x in t["configs"]]
     names = validate(configs)
-    cache = cache_dir(Parameters["scaling_mode"], t["smoke_test"])
+    cache = cache_dir(Parameters["scaling_mode"], t["smoke_test"],
+                      runs_per_fault if not t["smoke_test"] else None)
     summary_path = os.path.join(cache, t["summary_csv"])
     pred_path = os.path.join(cache, t["cm_pred_csv"])
 
     describe(configs, cache, fc_mode=t["fc_mode"], top_k=t["top_k"],
              scaling_mode=Parameters["scaling_mode"],
-             runs_per_fault=Parameters["runs_per_fault"], smoke_test=t["smoke_test"])
+             runs_per_fault=runs_per_fault, smoke_test=t["smoke_test"])
 
     train_top = test_top = None
     if os.path.exists(summary_path) and os.path.exists(pred_path):
@@ -206,7 +248,7 @@ def stage_tsfresh():
         summary = load_summary(summary_path)
     else:
         common = dict(data_dir=Parameters["data_dir"],
-                      runs_per_fault=Parameters["runs_per_fault"],
+                      runs_per_fault=runs_per_fault,
                       run_length=t["run_length"], top_k=t["top_k"],
                       chunk_runs=t["chunk_runs"],
                       scaling_mode=Parameters["scaling_mode"],
@@ -223,13 +265,13 @@ def stage_tsfresh():
                                       lc_cv_folds=t["lc_cv_folds"])
 
     save(plot_comparison(compare(summary, names), t["label"], t["top_k"]),
-         "tsfresh_vergleich")
+         f"tsfresh_{family}_vergleich")
 
     cm = tsfresh_confusion(names, pred_path, train_top, test_top,
                            summary_path=summary_path)
-    save(plot_confusion_grid(cm, t["top_k"]), "tsfresh_confusion_raster")
-    save(plot_confusion_detail(cm)[0], "tsfresh_confusion_detail")
-    save(plot_recall(cm)[0], "tsfresh_recall")
+    save(plot_confusion_grid(cm, t["top_k"]), f"tsfresh_{family}_confusion_raster")
+    save(plot_confusion_detail(cm)[0], f"tsfresh_{family}_confusion_detail")
+    save(plot_recall(cm)[0], f"tsfresh_{family}_recall")
 
 
 def print_params(params):
