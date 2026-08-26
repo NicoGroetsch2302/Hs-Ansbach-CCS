@@ -41,13 +41,13 @@ from .aggregate import aggregate, export, value_columns
 from .data import faultfree_by_run, load_train, merge_faults
 from .plots import (plot_bars, plot_cv, plot_dyca_mn_estimate, plot_means,
                     plot_scalar, plot_stds, transform)
-from .spectra import (SPECTRA, csv_name, get, label, min_samples,
+from .spectra import (SPECTRA, csv_name, effective_mode, get, label,
                       needs_scaler, prefix, run_spectra)
 
 __all__ = [
     "load_train", "merge_faults", "faultfree_by_run", "fit_scaler",
     "run_spectra", "SPECTRA", "get", "label", "prefix", "needs_scaler",
-    "csv_name", "min_samples",
+    "csv_name", "effective_mode",
     "aggregate", "export", "value_columns",
     "plot_means", "plot_stds", "plot_cv", "plot_bars",
     "plot_scalar", "plot_dyca_mn_estimate", "transform",

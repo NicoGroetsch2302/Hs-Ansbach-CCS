@@ -10,7 +10,11 @@ steht in `run_spectra`.
     "dyca"   generalisierte Eigenwerte der DyCA            -> dyca_1..52
     "dpca"   Varianzanteile nach Lag-Stacking              -> dpca_1..156
     "cva"    kanonische Korrelationen Vergangenheit/Zukunft-> cva_1..52
-    "ica"    |Kurtosis| der FastICA-Quellen, absteigend    -> ica_1..12
+    "ica"    Exzess-Kurtosis der FastICA-Quellen           -> ica_1..12
+             VORZEICHENBEHAFTET, sortiert nach |Kurtosis| absteigend:
+             positiv = supergaussisch (spitz), negativ = subgaussisch
+             (flach). Beides ist Nicht-Gaussianitaet, der Betrag misst
+             sie, das Vorzeichen sagt welcher Art.
     "lda"    Fisher-Kennzahl gegen einen Normalbetriebslauf-> lda_eigenvalue
 
 Ein Eintrag in SPECTRA hat die Schluessel:
@@ -97,9 +101,10 @@ def _apply_cva(X, cva_past=1, cva_fut=1, ridge_rel=1e-6, **_):
 
 def _apply_ica(X, ica_n=12, ica_max_iter=1000, ica_tol=1e-3,
                ica_random_state=42, **_):
-    """Nicht-Gaussianitaets-Spektrum: Kurtosis der FastICA-Quellen, nach
-    Betrag absteigend sortiert. Ob FastICA konvergiert ist, wird als
-    eigene Spalte mitgefuehrt."""
+    """Nicht-Gaussianitaets-Spektrum: Exzess-Kurtosis der FastICA-Quellen,
+    nach BETRAG absteigend sortiert, aber MIT Vorzeichen exportiert.
+    Die Folge ica_1..n ist also in |kurt| monoton, nicht in kurt. Ob
+    FastICA konvergiert ist, wird als eigene Spalte mitgefuehrt."""
     X = np.asarray(X, dtype=np.float64)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -233,17 +238,6 @@ def csv_name(method: str, scaling_mode: str = "global_mean",
     return f"{get(method)['csv_stem']}_{split}{suffix}.csv"
 
 
-def min_samples(method: str, dyca_m: int = 2, dyca_n: int = 4,
-                cva_past: int = 1, cva_fut: int = 1) -> int | None:
-    """Mindestlaenge eines Runs; kuerzere werden uebersprungen.
-    None = keine Pruefung noetig."""
-    if method == "dyca":
-        return max(dyca_m, dyca_n) + 5
-    if method == "cva":
-        return len(PROC_COLS) + cva_past + cva_fut + 5
-    return None
-
-
 # =========================================================================
 # Die gemeinsame Schleife
 # =========================================================================
@@ -290,14 +284,13 @@ def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
                   ica_n=ica_n, ica_max_iter=ica_max_iter, ica_tol=ica_tol,
                   ica_random_state=ica_random_state,
                   ff_by_run=ff_by_run or {})
-    limit = min_samples(method, dyca_m, dyca_n, cva_past, cva_fut)
 
     iterator = tqdm(df_all.groupby(["faultNumber", "simulationRun"],
                                    sort=True),
                     desc=f"Berechne {name}-Spektrum pro Run")
 
     records, first_errors = [], []
-    n_err = n_skip = 0
+    n_err = 0
 
     for (fault, run), group in iterator:
         # Pre-Fault verwerfen - nur bei echten Faults. Der Fehler wird
@@ -306,9 +299,6 @@ def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
         # wuerden die Fault-Statistik verwaessern.
         if fault != 0:
             group = group[group["sample"] >= pre_fault_cutoff]
-        if limit is not None and len(group) < limit:
-            n_skip += 1
-            continue
 
         try:
             # Defensive Sortierung: df_all ist zwar global nach
@@ -343,11 +333,8 @@ def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
         # Ein Lauf ohne ein einziges Ergebnis ist nie beabsichtigt - frueher
         # lief das Notebook stumm weiter und exportierte eine leere CSV.
         raise RuntimeError(
-            f"{name}: KEIN einziger Run erfolgreich "
-            f"({n_err} Fehler, {n_skip} uebersprungen). "
-            + ("Erste Fehler:\n" + "\n".join(first_errors)
-               if first_errors else
-               "Alle Runs waren kuerzer als das Minimum."))
+            f"{name}: KEIN einziger Run erfolgreich ({n_err} Fehler).\n"
+            + "\n".join(first_errors))
 
     df = pd.DataFrame.from_records(records)
     if not df.empty and not spec.get("scalar"):
@@ -361,8 +348,6 @@ def run_spectra(df_all, method: str, *, scaling_mode: str = "global_mean",
 
     if verbose:
         print(f"Erfolgreiche Runs: {len(df)}")
-        if limit is not None:
-            print(f"Uebersprungen   : {n_skip} (weniger als {limit} Samples)")
         print(f"Fehler          : {n_err}")
         if "converged" in df.columns:
             n_conv = int(df["converged"].sum())

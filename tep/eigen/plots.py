@@ -32,18 +32,29 @@ def transform(vals, mode: str = "log"):
                Eigenwerte liegen bei 1e-8 und darunter).
     "relative" Wert / Wert_1. Zeigt nur das Profil des Spektrums,
                unabhaengig vom Absolutniveau einer Fehlerklasse.
+
+    Beide setzen positive Werte voraus. ICA exportiert vorzeichen-
+    behaftete Kurtosis; dort erzeugte "log" frueher wortlos einen Boden
+    bei -12 und "relative" ein negatives Verhaeltnis. Lieber gar kein
+    Plot als ein irrefuehrender.
     """
     vals = np.asarray(vals, dtype=float)
     if mode == "linear":
         return vals
     if mode == "log":
+        neg = int((vals < 0).sum())
+        if neg:
+            raise ValueError(
+                f"plot_mode='log' bei {neg} negativen Werten - log10 ist "
+                f"dort nicht definiert und das Clipping erfaende einen "
+                f"Boden. Fuer ICA plot_mode='linear' verwenden.")
         # log10(0) waere -inf und wuerde den Plot zerreissen.
         return np.log10(np.maximum(vals, 1e-12))
     if mode == "relative":
         if vals[0] <= 0:
-            # Defensiv: bei Wert_1 <= 0 (numerisch entartet) waere die
-            # Normierung undefiniert.
-            return vals
+            raise ValueError(
+                "plot_mode='relative' braucht einen positiven ersten "
+                "Wert als Bezug.")
         return vals / vals[0]
     raise ValueError(f"Unbekannter mode: {mode!r}")
 
@@ -140,24 +151,37 @@ def plot_cv(agg_df, method: str, k_max: int = 10,
 
     Die dimensionslose Streuung: sie macht Komponenten vergleichbar, deren
     Absolutniveau um Groessenordnungen auseinanderliegt.
+
+    Nur fuer Groessen mit positivem Mittelwert sinnvoll. Bei ICA wechselt
+    die Kurtosis das Vorzeichen; solche Komponenten werden zu NaN und
+    fehlen im Plot - wie viele, steht danach im Klartext da, statt dass
+    die Kurve stillschweigend Luecken hat.
     """
     lab = get(method)["label"]
     mean_cols = _stat_cols(agg_df, method, "mean", k_max)
     std_cols = _stat_cols(agg_df, method, "std", k_max)
+    n_drop = 0
 
     def values_of(row):
+        nonlocal n_drop
         m = np.array([row[c] for c in mean_cols], dtype=float)
         s = np.array([row[c] for c in std_cols], dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
             cv = np.where(m > 0, s / m, np.nan)
+        n_drop += int(np.isnan(cv).sum())
         return transform(cv, plot_mode)
 
-    return _lines(
+    fig = _lines(
         agg_df, method, values_of, "tab:green",
         f"Relative Streuung der {lab}-Werte pro Komponente fuer alle "
         f"Fehlerklassen ({plot_mode}-Skala, erste {{K}} Komponenten)",
         _ylabel(plot_mode, "Variationskoeffizient (Std / Mittelwert)", "CV"),
         ncols)
+    if n_drop:
+        n_zellen = len(np.sort(agg_df["faultNumber"].unique())) * len(mean_cols)
+        print(f"  Hinweis: {n_drop} von {n_zellen} CV-Werten entfallen "
+              f"(Mittelwert <= 0, bei {lab} kein sinnvoller CV).")
+    return fig
 
 
 def plot_bars(agg_df, method: str, k_bar: int = 10, ncols: int = 6):

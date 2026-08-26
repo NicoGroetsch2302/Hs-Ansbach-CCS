@@ -72,7 +72,7 @@ def test_inv_sqrt_psd():
 
 def test_spectra_registry():
     """Jeder SPECTRA-Eintrag hat die Pflichtschluessel und callable apply."""
-    from tep.eigen.spectra import SPECTRA, csv_name, get, min_samples
+    from tep.eigen.spectra import SPECTRA, csv_name, get
 
     assert set(SPECTRA) == {"pca", "dyca", "dpca", "cva", "ica", "lda"}
     for method, spec in SPECTRA.items():
@@ -80,10 +80,6 @@ def test_spectra_registry():
             assert key in spec, (method, key)
         assert callable(spec["apply"]), method
         assert get(method) is spec
-    # nur DyCA und CVA brauchen eine Mindestlaenge
-    assert min_samples("pca") is None
-    assert min_samples("dyca", dyca_m=6, dyca_n=12) == 17
-    assert min_samples("cva", cva_past=1, cva_fut=1) == 52 + 1 + 1 + 5
     # Die CSV-Namen sind eingefroren - LazyClassifier_PCA_DyCA liest sie.
     assert csv_name("pca") == "pca_eigenvalues_train.csv"
     assert csv_name("dyca", "scaler", "test") == "dyca_eigenvalues_test_scaler.csv"
@@ -275,6 +271,26 @@ def test_fit_scaler_wird_gemerkt():
     assert hasattr(fit_scaler, "cache_info"), "lru_cache verschwunden?"
     fit_scaler.cache_clear()
     assert fit_scaler.cache_info().currsize == 0
+
+
+def test_transform_luegt_nicht_bei_negativen_werten():
+    """ICA exportiert vorzeichenbehaftete Kurtosis. log10 ist dort nicht
+    definiert - frueher erzeugte das Clipping wortlos einen Boden bei -12,
+    der wie ein Messwert aussah."""
+    import numpy as np
+
+    from tep.eigen import transform
+
+    v = [11.78, -0.60, 0.43]
+    assert np.array_equal(transform(v, "linear"), np.array(v))
+    for mode in ("log", "relative"):
+        try:
+            transform(v if mode == "log" else [-1.0, 2.0], mode)
+        except ValueError:
+            continue
+        raise AssertionError(f"transform(..., {mode!r}) haette scheitern muessen")
+    # positive Werte bleiben unberuehrt
+    assert np.allclose(transform([1.0, 0.1], "log"), [0.0, -1.0])
 
 
 if __name__ == "__main__":

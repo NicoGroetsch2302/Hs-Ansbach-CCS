@@ -9,9 +9,8 @@ scaling_mode: global_mean   # global_mean | scaler  (LDA erzwingt scaler)
 runs_per_fault: null        # null = alle 500 Runs je Fault; 3 = Probelauf
 plot_dir: plots             # hierhin die PNGs
 
-# Zwei Klassifikationswege - eigen ODER tsfresh; beide zusammen sind
-# zwei Experimente in einem Lauf, kein Widerspruch, nur teurer.
-# amplitudes gehoert zu keinem von beiden (reiner NPZ-Export).
+# Zwei Klassifikationswege - eigen ODER tsfresh; 
+# beide zusammen sind zwei Experimente in einem Lauf
 stages: [eigen, tsfresh]
 
 
