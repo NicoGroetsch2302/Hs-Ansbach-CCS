@@ -293,6 +293,26 @@ def test_transform_luegt_nicht_bei_negativen_werten():
     assert np.allclose(transform([1.0, 0.1], "log"), [0.0, -1.0])
 
 
+def test_save_legt_unterordner_an():
+    """save() sortiert nach Namenspraefix: eigen_pca_mittel landet in
+    eigen/pca_mittel.png. Flach nebeneinander waeren es fuenfundzwanzig
+    Bilder aus zwei Wegen."""
+    import os
+    import tempfile
+
+    import main
+
+    with tempfile.TemporaryDirectory() as tmp:
+        main.Parameters = {"plot_dir": tmp, "scaling_mode": "global_mean",
+                           "runs_per_fault": None}
+        main.save(main.plt.figure(), "eigen_pca_mittel")
+        main.save((main.plt.figure(), main.plt.figure()),
+                  "tsfresh_pca_dyca_recall")
+        for rel in ("eigen/pca_mittel.png", "tsfresh/pca_dyca_recall_1.png",
+                    "tsfresh/pca_dyca_recall_2.png"):
+            assert os.path.exists(os.path.join(tmp, rel)), rel
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

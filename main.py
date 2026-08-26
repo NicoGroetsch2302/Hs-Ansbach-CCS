@@ -49,13 +49,17 @@ from tep.tsfresh import confusion as tsfresh_confusion                 # noqa
 
 
 def save(fig, name):
-    """Figur(en) als PNG ablegen. Die tep-Plotfunktionen rufen plt.show(),
-    das ist unter Agg ein No-op - gespeichert wird hier."""
+    """Figur(en) als PNG ablegen. Das erste Namensteil ist der Unterordner
+    (eigen/, tsfresh/) - flach nebeneinander sind es fuenfundzwanzig
+    Bilder aus zwei Wegen. Die tep-Plotfunktionen rufen plt.show(), das
+    ist unter Agg ein No-op - gespeichert wird hier."""
     figs = fig if isinstance(fig, tuple) else (fig,)
+    sub, _, stem = name.partition("_")
+    d = os.path.join(Parameters["plot_dir"], sub)
+    os.makedirs(d, exist_ok=True)
     for i, f in enumerate(figs, start=1):
         suffix = "" if len(figs) == 1 else f"_{i}"
-        path = os.path.join(Parameters["plot_dir"],
-                            f"{name}{_probe_suffix()}{suffix}.png")
+        path = os.path.join(d, f"{stem}{_probe_suffix()}{suffix}.png")
         f.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(f)
         print(f"    Bild: {path}")
@@ -212,7 +216,7 @@ def _classify_spectra(e):
         print(f"  Leaderboards -> {board}")
 
     results = confusion(sets, e["random_state"])
-    save(plot_confusions(results), "spektren_confusion")
+    save(plot_confusions(results), "eigen_spektren_confusion")
     report_confusions(results)
 
 
@@ -294,7 +298,6 @@ if __name__ == "__main__":
 
     Parameters = yaml.safe_load(open(args.params, encoding="utf-8"))
     print_params(Parameters)
-    os.makedirs(Parameters["plot_dir"], exist_ok=True)
 
     for name in (args.stages or Parameters["stages"]):
         print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")

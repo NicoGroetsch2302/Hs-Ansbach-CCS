@@ -43,7 +43,8 @@ Dazu eine Stufe, die zu **keinem** der beiden Wege gehört:
 Die NPZ wird von nichts wieder eingelesen — `tsfresh` rechnet seine
 Projektionen selbst.
 
-Bilder landen in `plots/`. Zwischenergebnisse werden nicht neu gerechnet, wenn
+Bilder landen in `plots/<stufe>/`, also `plots/eigen/` und
+`plots/tsfresh/`. Zwischenergebnisse werden nicht neu gerechnet, wenn
 sie schon auf Platte liegen (Spektren-CSVs, NPZ, TSFresh-Chunks, `summary`- und
 Vorhersage-CSV) — neu rechnen heißt: die betreffende Datei löschen.
 
