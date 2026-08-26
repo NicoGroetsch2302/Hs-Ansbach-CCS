@@ -183,20 +183,52 @@ def test_params_yaml():
 
 
 def test_cache_namen_trennen_probelauf():
-    """runs_per_fault MUSS in Dateinamen und Cache-Ordner stehen - sonst
-    liest ein Probelauf die Ergebnisse des Volllaufs und umgekehrt."""
+    """runs_per_fault MUSS im CSV-Namen stehen - sonst liest ein Probelauf
+    die Ergebnisse des Volllaufs und umgekehrt."""
     from tep.eigen.spectra import csv_name
-    from tep.tsfresh.features import cache_dir
 
     assert csv_name("pca") == "pca_eigenvalues_train.csv"
     assert csv_name("pca", runs_per_fault=3) == "pca_eigenvalues_train_r3.csv"
     assert (csv_name("pca", "scaler", "test", 3)
             == "pca_eigenvalues_test_scaler_r3.csv")
-    # Volllauf und Probelauf duerfen nie denselben Ordner treffen
-    voll = cache_dir("global_mean", False, None)
-    probe = cache_dir("global_mean", False, 3)
-    assert voll != probe, (voll, probe)
-    assert probe.endswith("_r3"), probe
+
+
+def test_cache_ordner_trennt_jeden_parameter():
+    """Jeder Parameter, der den Chunk-Inhalt bestimmt, muss den Ordner
+    aendern. Fehlte einer im Namen, las ein Lauf wortlos die Chunks eines
+    anderen - bei fc_mode nachgestellt: 20 statt 1460 Spalten.
+
+    Umgekehrt gilt: gleiche Parameter, gleicher Ordner. Darauf beruht,
+    dass die drei Schwester-Notebooks sich die raw-Chunks teilen.
+    """
+    import contextlib
+    import os
+    import tempfile
+
+    from tep.tsfresh.features import cache_dir
+
+    basis = dict(fc_mode="efficient", run_length=480, chunk_runs=250,
+                 data_dir="data_csv", dpca_lags=2, cva_past=1, cva_fut=1,
+                 cva_ridge_rel=1e-6, ica_max_iter=1000, ica_tol=1e-3,
+                 ica_random_state=42)
+    # chdir: cache_dir legt den Ordner an, der Test soll das Repo nicht
+    # vollmuellen (frueher blieben tsfresh_cache/ und tsfresh_cache_r3/ liegen).
+    with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+        ref = cache_dir("global_mean", False, None, **basis)
+        assert cache_dir("global_mean", False, None, **basis) == ref
+        assert os.path.exists(os.path.join(ref, "parameter.json"))
+
+        anders = [("fc_mode", "minimal"), ("run_length", 240),
+                  ("chunk_runs", 100), ("data_dir", "andere_daten"),
+                  ("dpca_lags", 3), ("cva_past", 2), ("cva_fut", 2),
+                  ("cva_ridge_rel", 1e-5), ("ica_max_iter", 500),
+                  ("ica_tol", 1e-2), ("ica_random_state", 7)]
+        for key, wert in anders:
+            assert cache_dir("global_mean", False, None,
+                             **{**basis, key: wert}) != ref, key
+        assert cache_dir("scaler", False, None, **basis) != ref
+        assert cache_dir("global_mean", True, None, **basis) != ref
+        assert cache_dir("global_mean", False, 3, **basis) != ref
 
 
 def test_notebooks_entpacken_plot_recall():

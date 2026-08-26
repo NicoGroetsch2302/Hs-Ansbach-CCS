@@ -237,8 +237,14 @@ def stage_tsfresh():
     family = re.sub(r"[^a-z0-9]+", "_", t["label"].lower()).strip("_")
     configs = [tuple(x) for x in t["configs"]]
     names = validate(configs)
+    # Der Ordnername traegt alles, was den Chunk-Inhalt bestimmt - ein
+    # geaenderter Parameter trifft damit nie die Chunks des alten Laufs,
+    # sondern legt einen eigenen Ordner an.
     cache = cache_dir(Parameters["scaling_mode"], t["smoke_test"],
-                      runs_per_fault if not t["smoke_test"] else None)
+                      runs_per_fault, fc_mode=t["fc_mode"],
+                      run_length=t["run_length"], chunk_runs=t["chunk_runs"],
+                      data_dir=Parameters["data_dir"],
+                      **Parameters["proj_params"])
     summary_path = os.path.join(cache, t["summary_csv"])
     pred_path = os.path.join(cache, t["cm_pred_csv"])
 

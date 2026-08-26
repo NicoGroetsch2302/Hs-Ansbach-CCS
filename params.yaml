@@ -15,8 +15,8 @@ stages: [eigen, tsfresh]
 
 
 # --- Verfahrensparameter der Projektionen (amplitudes UND tsfresh) -------
-# ACHTUNG: stecken NICHT im Konfigurationsnamen und damit nicht im
-# Cache-Praefix. Bei Aenderung vorher die betroffenen Chunks loeschen.
+# Stehen im Cache-Ordnernamen: eine Aenderung legt einen eigenen Ordner an
+# und rechnet neu, statt still die Chunks des alten Laufs zu lesen.
 proj_params:
   dpca_lags: 2
   cva_past: 1
@@ -91,7 +91,7 @@ tsfresh:
   label: PCA/DyCA           # erscheint in den Plottiteln
   top_k: 100                # Merkmale je Konfiguration
   fc_mode: efficient        # minimal | efficient | comprehensive
-  chunk_runs: 250           # MUSS 250 bleiben, solange der Cache geteilt wird
+  chunk_runs: 250           # steht im Cache-Ordnernamen, Aenderung rechnet neu
   run_length: 480
   lc_cv_folds: 5
   smoke_test: false         # true -> winziger Lauf, eigener Cache-Ordner

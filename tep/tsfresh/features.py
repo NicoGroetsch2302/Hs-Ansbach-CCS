@@ -13,6 +13,7 @@ Dateinamen im Cache-Ordner:
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import os
 import warnings
@@ -43,25 +44,52 @@ def fc_parameters(fc_mode: str = "efficient") -> dict:
     return FC_MODES[fc_mode]()
 
 
-def cache_dir(scaling_mode: str = "global_mean",
-              smoke_test: bool = False,
-              runs_per_fault: int | None = None) -> str:
-    """Cache-Ordner, angelegt falls noetig.
+def cache_dir(scaling_mode: str = "global_mean", smoke_test: bool = False,
+              runs_per_fault: int | None = None, *, fc_mode: str,
+              run_length: int | None, chunk_runs: int, data_dir: str,
+              **proj_params) -> str:
+    """Cache-Ordner fuer GENAU diese Parameter, angelegt falls noetig.
 
-    Der Ordner ist BEWUSST zwischen den Notebooks geteilt - die
-    ``raw``-Konfiguration ist ueberall bitidentisch, ihre Chunks und die
-    Top-K-Auswahl werden dadurch wiederverwendet. `smoke_test` bekommt
-    einen eigenen Ordner und ueberschreibt also nichts.
+    Alles, was den Inhalt eines Chunks bestimmt, steht im Ordnernamen:
+    lesbar, soweit es kurz ist, als Kurz-Hash fuer den Rest. Zwei Laeufe
+    mit unterschiedlichen Parametern koennen sich damit nicht mehr
+    begegnen - gibt es den Ordner nicht, wird neu gerechnet und er
+    entsteht dabei.
+
+    Vorher standen fc_mode, run_length, chunk_runs und die
+    Verfahrensparameter NICHT im Namen. Ein Lauf mit fc_mode="efficient"
+    las wortlos die Chunks eines minimal-Laufs weiter: 20 statt 1460
+    Spalten, ohne eine Zeile Ausgabe. Zwei Kommentare in params.yaml
+    ("bei Aenderung vorher die Chunks loeschen", "chunk_runs MUSS 250
+    bleiben") baten deshalb um Gedaechtnis - das ist jetzt Aufgabe des
+    Ordnernamens.
+
+    Geteilt wird der Ordner weiterhin absichtlich zwischen den
+    Schwester-Notebooks: gleiche Parameter, gleicher Hash, die
+    raw-Chunks werden wiederverwendet.
+
+    `parameter.json` im Ordner sagt, wofuer der Hash steht.
     """
-    path = "tsfresh_cache_smoke" if smoke_test else "tsfresh_cache"
+    identitaet = dict(scaling_mode=scaling_mode, smoke_test=smoke_test,
+                      runs_per_fault=runs_per_fault, fc_mode=fc_mode,
+                      run_length=run_length, chunk_runs=chunk_runs,
+                      data_dir=data_dir, **proj_params)
+    kurz = hashlib.sha1(
+        json.dumps(identitaet, sort_keys=True, default=str).encode()
+    ).hexdigest()[:6]
+
+    teile = ["tsfresh_cache_smoke" if smoke_test else "tsfresh_cache"]
     if scaling_mode != "global_mean":
-        path += f"_{scaling_mode}"
-    # runs_per_fault MUSS in den Ordnernamen: die Chunk-Dateien heissen
-    # nur nach Index, ein Probelauf wuerde sonst die Chunks des
-    # Volllaufs lesen - und seine eigenen darin hinterlassen.
+        teile.append(scaling_mode)
     if runs_per_fault is not None:
-        path += f"_r{runs_per_fault}"
+        teile.append(f"r{runs_per_fault}")
+    path = "_".join(teile + [fc_mode, kurz])
+
     os.makedirs(path, exist_ok=True)
+    manifest = os.path.join(path, "parameter.json")
+    if not os.path.exists(manifest):
+        with open(manifest, "w", encoding="utf-8") as fh:
+            json.dump(identitaet, fh, indent=1, sort_keys=True)
     return path
 
 
@@ -90,15 +118,21 @@ def save_top_names(cache: str, spec, top_k: int, names: list) -> None:
 
 
 def _subset(part: pd.DataFrame, usecols) -> pd.DataFrame:
-    """Auf usecols reduzieren. Fehlende Spalten (z.B. weil der Cache mit
-    anderen fc_parameters gebaut wurde) werden mit 0.0 ergaenzt, statt mit
-    einem KeyError mitten im Nachtlauf abzubrechen."""
+    """Auf usecols reduzieren.
+
+    Fehlt eine Spalte, ist der Chunk kaputt - seit der Ordnername alle
+    Parameter traegt, kann er nicht mehr aus einem anderen fc_mode
+    stammen. Frueher wurde hier still mit 0.0 aufgefuellt; das war die
+    Symptombehandlung fuer genau diese Luecke.
+    """
     if usecols is None:
         return part
     missing = [c for c in usecols if c not in part.columns]
     if missing:
-        for c in missing:
-            part[c] = np.float32(0.0)
+        raise RuntimeError(
+            f"{len(missing)} Spalten fehlen im Cache-Chunk, z.B. "
+            f"{missing[:3]}. Der Ordnername passt zu den Parametern, der "
+            f"Inhalt nicht - Ordner loeschen und neu rechnen.")
     return part[usecols]
 
 
@@ -186,9 +220,6 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
 
         part = part.astype(np.float32)
         part.to_pickle(path)
-        # _subset statt part[usecols]: schuetzt auch den Frisch-Berechnen-
-        # Pfad vor einem KeyError, falls eine im Auswahl-JSON stehende
-        # Spalte (z.B. nach fc_mode-Wechsel) nicht erzeugt wurde.
         parts.append(_subset(part, usecols))
         del wide, part
         gc.collect()
