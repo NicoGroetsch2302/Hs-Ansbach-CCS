@@ -44,7 +44,7 @@ from tep.tsfresh import (apply_features, benchmark_models, cache_dir,  # noqa
                          compare, config_name, describe, load_runs,
                          load_summary, plot_comparison,
                          plot_confusion_detail, plot_confusion_grid,
-                         plot_recall, project, select_features, validate)
+                         plot_recall, project, extract_and_select_features, validate)
 from tep.tsfresh import confusion as tsfresh_confusion                 # noqa
 
 
@@ -89,7 +89,7 @@ def stage_eigen():
                 df_all = merge_faults(df_ff, df_faulty)
             scaler = (fit_scaler(Parameters["data_dir"])
                       if needs_scaler(method, Parameters["scaling_mode"])
-                      else None) # TODO: es wird skaliert vor der Berechnung der Eigenwerte
+                      else None)  # TODO: es wird skaliert vor der Berechnung der Eigenwerte
             kw = dict(eigen_params["params"])
             if method == "lda":           # Lauf gegen Normalbetrieb
                 kw["ff_by_run"] = faultfree_by_run(
@@ -264,9 +264,9 @@ def stage_tsfresh():
                               if Parameters["scaling_mode"] == "scaler"
                               else None),
                       **Parameters["proj_params"])
-        train_top, top_names = select_features(configs, cache,
-                                               fc_mode=t["fc_mode"],
-                                               **common)
+        train_top, top_names = extract_and_select_features(configs, cache,
+                                                           fc_mode=t["fc_mode"],
+                                                           **common)
         test_top = apply_features(configs, cache, top_names, **common)
         summary, _ = benchmark_models(configs, train_top, test_top,
                                       summary_path,
@@ -277,7 +277,8 @@ def stage_tsfresh():
 
     cm = tsfresh_confusion(names, pred_path, train_top, test_top,
                            summary_path=summary_path)
-    save(plot_confusion_grid(cm, t["top_k"]), f"tsfresh_{family}_confusion_raster")
+    save(plot_confusion_grid(cm, t["top_k"]),
+         f"tsfresh_{family}_confusion_raster")
     save(plot_confusion_detail(cm)[0], f"tsfresh_{family}_confusion_detail")
     save(plot_recall(cm)[0], f"tsfresh_{family}_recall")
 

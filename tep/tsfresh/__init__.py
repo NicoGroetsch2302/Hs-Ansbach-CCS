@@ -48,14 +48,14 @@ from .confusion import plot_recall
 from .data import load_runs
 from .features import cache_dir, extract_config, fc_parameters, rank_features
 from .pipeline import (apply_features, benchmark_models, common_runs,
-                       describe, load_summary, matrices, select_features)
+                       describe, load_summary, matrices, extract_and_select_features)
 from .projections import (PROJECTORS, channel_names, config_name, n_channels,
                           project, validate)
 from .reporting import compare, plot_comparison
 
 __all__ = [
     "cache_dir", "fc_parameters", "validate", "describe", "fit_scaler",
-    "select_features", "apply_features", "benchmark_models",
+    "extract_and_select_features", "apply_features", "benchmark_models",
     "common_runs", "matrices", "load_summary",
     "PROC_COLS", "META_COLS", "SPLIT_FILES", "PRE_FAULT_CUTOFF", "LABELS",
     "load_runs", "run_id", "labels_from_index",

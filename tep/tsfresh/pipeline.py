@@ -79,12 +79,12 @@ def describe(configs, cache: str, *, top_k: int = 100) -> None:
 # Merkmale waehlen (Train)
 # =========================================================================
 
-def select_features(configs, cache: str, *, data_dir: str = ".",
-            runs_per_fault: int | None = None, run_length: int | None = 480,
-            fc_mode: str = "efficient", top_k: int = 100,
-            chunk_runs: int = 250, block_cols: int = 4000,
-            n_jobs: int | None = None, scaling_mode: str = "global_mean",
-            scaler=None, fix_signs: bool = True, **proj_params):
+def extract_and_select_features(configs, cache: str, *, data_dir: str = ".",
+                                runs_per_fault: int | None = None, run_length: int | None = 480,
+                                fc_mode: str = "efficient", top_k: int = 100,
+                                chunk_runs: int = 250, block_cols: int = 4000,
+                                n_jobs: int | None = None, scaling_mode: str = "global_mean",
+                                scaler=None, fix_signs: bool = True, **proj_params):
     """Train extrahieren, Features auswaehlen, auf Top-K reduzieren.
 
     Konfigurationen strikt nacheinander: die volle Matrix einer
@@ -147,10 +147,10 @@ def select_features(configs, cache: str, *, data_dir: str = ".",
 
 def apply_features(configs, cache: str, top_names: dict, *,
                    data_dir: str = ".",
-            runs_per_fault: int | None = None, run_length: int | None = 480,
-            top_k: int = 100, chunk_runs: int = 250,
-            n_jobs: int | None = None, scaling_mode: str = "global_mean",
-            scaler=None, fix_signs: bool = True, **proj_params) -> dict:
+                   runs_per_fault: int | None = None, run_length: int | None = 480,
+                   top_k: int = 100, chunk_runs: int = 250,
+                   n_jobs: int | None = None, scaling_mode: str = "global_mean",
+                   scaler=None, fix_signs: bool = True, **proj_params) -> dict:
     """Testset extrahieren - nur die gewaehlten Merkmale."""
     if not top_names:
         raise RuntimeError("top_names fehlt -> zuerst select_features() "
@@ -236,7 +236,7 @@ def matrices(name: str, train_top: dict, test_top: dict):
 
 def benchmark_models(configs, train_top: dict, test_top: dict,
                      summary_path: str,
-            *, lc_cv_folds: int = 5, random_state: int = 42):
+                     *, lc_cv_folds: int = 5, random_state: int = 42):
     """LazyClassifier je Konfiguration; schreibt die summary-CSV.
 
     Rueckgabe: (summary, leaderboards) - die Tabelle und je Konfiguration
