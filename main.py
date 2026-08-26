@@ -248,9 +248,7 @@ def stage_tsfresh():
     summary_path = os.path.join(cache, t["summary_csv"])
     pred_path = os.path.join(cache, t["cm_pred_csv"])
 
-    describe(configs, cache, fc_mode=t["fc_mode"], top_k=t["top_k"],
-             scaling_mode=Parameters["scaling_mode"],
-             runs_per_fault=runs_per_fault, smoke_test=t["smoke_test"])
+    describe(configs, cache, top_k=t["top_k"])
 
     train_top = test_top = None
     if os.path.exists(summary_path) and os.path.exists(pred_path):

@@ -19,6 +19,7 @@ Nach einem Kernel-Neustart genuegt fuer die Auswertung die summary-CSV
 from __future__ import annotations
 
 import gc
+import json
 import os
 import time
 
@@ -35,23 +36,41 @@ from .features import (extract_config, fc_parameters, load_top_names,
 from .projections import config_name, n_channels, validate
 
 
-def describe(configs, cache: str, *, fc_mode: str = "efficient",
-             top_k: int = 100, scaling_mode: str = "global_mean",
-             runs_per_fault: int | None = None,
-             smoke_test: bool = False) -> None:
-    """Umfang des Laufs und Kanalzahl je Konfiguration im Klartext."""
-    n_calc = len(fc_parameters(fc_mode))
-    print(f"smoke_test={smoke_test} | fc_mode={fc_mode} "
-          f"({n_calc} Calculator) | top_k={top_k} "
-          f"| scaling_mode={scaling_mode}")
-    print(f"Runs je Fault: {runs_per_fault or 'alle'} | "
-          f"Cache: {cache}/ (geteilt mit den Schwester-Notebooks)")
+def describe(configs, cache: str, *, top_k: int = 100) -> None:
+    """Umfang des Laufs und Kanalzahl je Konfiguration im Klartext.
+
+    Die Parameter kommen aus `parameter.json` im Cache-Ordner, nicht als
+    Argumente: dort stehen genau die, mit denen die Chunks in diesem
+    Ordner gerechnet wurden. Eine Zusammenfassung, der man die Werte
+    erzaehlen muss, kann von der Rechnung abweichen - diese nicht.
+    """
+    pfad = os.path.join(cache, "parameter.json")
+    if not os.path.exists(pfad):
+        raise FileNotFoundError(
+            f"{pfad} fehlt - {cache!r} kommt nicht von cache_dir().")
+    with open(pfad, encoding="utf-8") as fh:
+        par = json.load(fh)
+
+    fc = fc_parameters(par["fc_mode"])
+    # len(fc) sind die Calculator-ARTEN. Jede expandiert in mehrere
+    # Spalten - fft_coefficient allein in rund hundert. Frueher stand
+    # hier len(fc), die "Groessenordnung" war dadurch zehnfach zu klein
+    # (raw: ~3796 gedruckt, ~40664 tatsaechlich).
+    n_spalten = sum(len(v) if v else 1 for v in fc.values())
+
+    print(f"smoke_test={par['smoke_test']} | fc_mode={par['fc_mode']} "
+          f"({len(fc)} Calculator-Arten, {n_spalten} Spalten je Kanal) "
+          f"| top_k={top_k} | scaling_mode={par['scaling_mode']}")
+    runs = par["runs_per_fault"]
+    print(f"Runs je Fault: {'alle' if runs is None else runs} | "
+          f"run_length={par['run_length']} | chunk_runs={par['chunk_runs']}")
+    print(f"Cache: {cache}/ (geteilt mit den Schwester-Notebooks)")
     print(f"\n{len(configs)} Konfigurationen:")
     for spec in configs:
         c = n_channels(spec)
         print(f"  {config_name(spec):22s} {c:3d} Kanaele -> "
-              f"~{c * n_calc} Features/Run (Groessenordnung)")
-    if not smoke_test:
+              f"~{c * n_spalten} Features/Run (Groessenordnung)")
+    if not par["smoke_test"]:
         print("\n!!! VOLLER LAUF - Stunden bis Nacht. Der Chunk-Cache "
               "macht Abbrechen und Fortsetzen gefahrlos. !!!")
 
@@ -147,8 +166,8 @@ def apply_features(configs, cache: str, top_names: dict, *,
         # top_k MUSS in der Cache-Kennung stehen: die Chunks enthalten
         # genau die in select_features() ausgewaehlten Features. Ohne top_k im
         # Namen wuerde ein spaeterer Lauf mit groesserem top_k die alten
-        # Chunks wiederverwenden und die fehlenden Spalten stumm mit 0.0
-        # auffuellen (siehe _subset in features.py).
+        # Chunks wiederverwenden - und Features verlangen, die nicht
+        # darin stehen (_subset in features.py wirft dann).
         Xte = extract_config(spec, "test", runs_test, cache,
                              tag=f"top{top_k}",
                              kind_to_fc=from_columns(top_names[name]),

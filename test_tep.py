@@ -372,6 +372,38 @@ def test_extract_config_wirft_statt_leer_zurueck():
     raise AssertionError("extract_config haette werfen muessen")
 
 
+def test_describe_schaetzt_die_spaltenzahl_richtig():
+    """Die gedruckte "Groessenordnung" muss zur echten Spaltenzahl passen.
+
+    Frueher stand dort len(fc_parameters), also die Zahl der Calculator-
+    ARTEN. Zehnfach zu klein: fft_coefficient allein expandiert in rund
+    hundert Spalten. An dieser Zahl entscheidet man, ob ein Lauf in den
+    RAM passt.
+    """
+    import contextlib
+    import io
+    import re
+    import tempfile
+
+    from tep.tsfresh import cache_dir, describe
+    from tep.tsfresh.features import extract_config, fc_parameters
+
+    spec = ("pca", 2)
+    rng = np.random.default_rng(0)
+    runs = {(0, 1): rng.normal(size=(120, 52)).astype(np.float32)}
+    with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+        cache = cache_dir("global_mean", False, None, fc_mode="efficient",
+                          run_length=480, chunk_runs=250, data_dir="data_csv")
+        aus = io.StringIO()
+        with contextlib.redirect_stdout(aus):
+            describe([spec], cache)
+        geschaetzt = int(
+            re.search(r"~(\d+) Features/Run", aus.getvalue()).group(1))
+        echt = extract_config(spec, "train", runs, cache,
+                              fc_params=fc_parameters("efficient")).shape[1]
+    assert abs(geschaetzt - echt) / echt < 0.05, (geschaetzt, echt)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
