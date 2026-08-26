@@ -140,7 +140,7 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
 
     name = config_name(spec)
     keys = sorted(runs.keys())
-    parts, n_failed = [], 0
+    parts, first_errors, n_failed = [], [], 0
 
     it = tqdm(list(range(0, len(keys), chunk_runs)),
               desc=f"{name:20s} [{split}/{tag}]")
@@ -158,8 +158,11 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
             try:
                 Y, names = project(runs[key], spec, scaling_mode, scaler,
                                    fix_signs, **proj_params)
-            except Exception:
+            except Exception as exc:
                 n_failed += 1      # z.B. numerisches Scheitern der DyCA-Stufe
+                if len(first_errors) < 5:
+                    first_errors.append(f"  fault={key[0]}, run={key[1]}: "
+                                        f"{exc}")
                 continue
             d = {"id": np.full(Y.shape[0], run_id(*key), dtype=np.int32),
                  "time": np.arange(Y.shape[0], dtype=np.int32)}
@@ -193,7 +196,16 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
     if n_failed:
         print(f"    {name}: {n_failed} Runs uebersprungen "
               f"(Projektion fehlgeschlagen)")
-    return pd.concat(parts) if parts else pd.DataFrame()
+    if not parts:
+        # Frueher kam hier ein leeres DataFrame zurueck: select_features
+        # schrieb daraus eine leere Top-K-Auswahl in den Cache, die jeden
+        # weiteren Lauf still leer liess. Eine unmoegliche Spec (dyca mit
+        # m < n - m) fiel damit erst Stunden spaeter auf. Die Meldung der
+        # Bibliothek steht dabei - sie sagt genau, was nicht geht.
+        raise RuntimeError(
+            f"{name}/{split}: KEIN einziger Run erfolgreich "
+            f"({n_failed} Fehler).\n" + "\n".join(first_errors))
+    return pd.concat(parts)
 
 
 def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000,

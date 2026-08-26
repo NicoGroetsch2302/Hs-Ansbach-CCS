@@ -116,15 +116,20 @@ def test_projector_registry():
 
 
 def test_validate_rejects_bad_specs():
-    """Rangbedingungen und doppelte Namen fliegen vor dem Lauf auf."""
+    """Was validate() noch abfaengt: doppelte Namen und unbekannte Arten.
+
+    Rangbedingungen stehen bewusst NICHT mehr hier - m >= n - m sagt die
+    dyca-Bibliothek selbst (test_extract_config_wirft_statt_leer_zurueck),
+    r <= n*s faellt beim ersten Run als IndexError auf, weil Y dann
+    weniger Kanaele hat als channel_names verspricht.
+    """
     from tep.tsfresh.projections import validate
 
-    for bad in [[("dyca", 2, 6)],                  # m >= n - m verletzt
-                [("dycvda", 6, 12, 2, 40)],        # r <= n*s verletzt
-                [("pca", 6), ("pca", 6)]]:         # doppelter Name
+    for bad in [[("pca", 6), ("pca", 6)],          # doppelter Name
+                [("gibtsnicht", 3)]]:              # unbekannte Art
         try:
             validate(bad)
-        except (AssertionError, ValueError):
+        except ValueError:
             continue
         raise AssertionError(f"validate({bad}) haette scheitern muessen")
 
@@ -311,6 +316,28 @@ def test_save_legt_unterordner_an():
         for rel in ("eigen/pca_mittel.png", "tsfresh/pca_dyca_recall_1.png",
                     "tsfresh/pca_dyca_recall_2.png"):
             assert os.path.exists(os.path.join(tmp, rel)), rel
+
+
+def test_extract_config_wirft_statt_leer_zurueck():
+    """Scheitert die Projektion an JEDEM Run - hier dyca mit m < n - m -,
+    kam frueher ein leeres DataFrame zurueck. select_features schrieb
+    daraus eine leere Top-K-Auswahl in den Cache, die jeden weiteren Lauf
+    still leer liess. Jetzt fliegt es, mit der Meldung der Bibliothek."""
+    import tempfile
+
+    from tep.tsfresh.features import extract_config, fc_parameters
+
+    rng = np.random.default_rng(0)
+    runs = {(f, 1): rng.normal(size=(60, 52)).astype(np.float32)
+            for f in (0, 1)}
+    with tempfile.TemporaryDirectory() as cache:
+        try:
+            extract_config(("dyca", 2, 6), "train", runs, cache,
+                           fc_params=fc_parameters("minimal"))
+        except RuntimeError as exc:
+            assert "m has to be greater" in str(exc), exc
+            return
+    raise AssertionError("extract_config haette werfen muessen")
 
 
 if __name__ == "__main__":

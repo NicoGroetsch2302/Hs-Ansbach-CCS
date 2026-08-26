@@ -19,7 +19,6 @@ Ein Eintrag in PROJECTORS hat die Schluessel:
     apply     (X_scaled, spec, **params) -> (T-Strich, C)-Array
     flip      ob die Vorzeichenkonvention angewandt wird. Bei "raw" nicht,
               dort gibt es keine Vorzeichenwillkuer zu beheben. Default True.
-    validate  optionaler Check der Spec vor dem Lauf
 
 Eigene Verfahren kommen als weiterer PROJECTORS-Eintrag dazu, ohne die
 Notebooks anzufassen. Jede `apply`-Funktion nimmt genau die Parameter
@@ -57,11 +56,6 @@ def _apply_pca(X, spec, **_):
 
 def _apply_dyca(X, spec, **_):
     return dyca_amplitudes(np.asarray(X, dtype=np.float64), spec[1], spec[2])
-
-
-def _validate_dyca(spec):
-    m, n = spec[1], spec[2]
-    assert m >= n - m, f"dyca verlangt m >= n - m, verletzt von {(m, n)}"
 
 
 def _apply_dpca(X, spec, dpca_lags=2, **_):
@@ -139,12 +133,6 @@ def _apply_dycvda(X, spec, cva_ridge_rel=1e-6, **_):
     return Pc @ J.T - (Fc @ L.T) * sv[:r]
 
 
-def _validate_dycvda(spec):
-    m, n, s, r = spec[1:]
-    assert m >= n - m, f"dyca verlangt m >= n - m, verletzt von {(m, n)}"
-    assert r <= n * s, f"r <= n*s verletzt von {(m, n, s, r)}"
-
-
 PROJECTORS = {
     "raw": {"name": lambda spec: "raw",
             "channels": lambda spec: list(PROC_COLS),
@@ -157,7 +145,7 @@ PROJECTORS = {
     "dyca": {"name": lambda spec: f"dyca_m{spec[1]}_n{spec[2]}",
              "channels": lambda spec: [f"dy{i}"
                                        for i in range(1, spec[2] + 1)],
-             "apply": _apply_dyca, "validate": _validate_dyca},
+             "apply": _apply_dyca},
     "dpca": {"name": lambda spec: f"dpca_{spec[1]}",
              "channels": lambda spec: [f"dpc{i}"
                                        for i in range(1, spec[1] + 1)],
@@ -176,7 +164,7 @@ PROJECTORS = {
                                      f"_s{spec[3]}_r{spec[4]}"),
                "channels": lambda spec: [f"cvd{i}"
                                          for i in range(1, spec[4] + 1)],
-               "apply": _apply_dycvda, "validate": _validate_dycvda},
+               "apply": _apply_dycvda},
 }
 
 
@@ -202,14 +190,17 @@ def n_channels(spec: tuple) -> int:
 
 
 def validate(configs) -> list:
-    """Prueft alle Specs (Rangbedingungen, doppelte Namen) und liefert die
-    Kurznamen in Reihenfolge."""
-    names = []
-    for spec in configs:
-        proj = get(spec)                       # wirft bei unbekannter Art
-        if "validate" in proj:
-            proj["validate"](spec)
-        names.append(config_name(spec))
+    """Die Kurznamen in Reihenfolge - und der einzige Check, den sonst
+    niemand macht.
+
+    Rangbedingungen der Verfahren stehen hier NICHT mehr: die melden die
+    Bibliotheken selbst, und seit extract_config bei leerem Ergebnis
+    wirft, kommt die Meldung auch an. Doppelte Namen dagegen bleiben
+    still - der Name ist Cache-Praefix UND Schluessel in train_top, zwei
+    gleiche ueberschreiben sich, und compare() verschmilzt sie
+    anschliessend per groupby zu einer Konfiguration.
+    """
+    names = [config_name(spec) for spec in configs]   # wirft bei unbek. Art
     if len(set(names)) != len(names):
         raise ValueError(f"Doppelte Konfigurationsnamen: {names}")
     return names
