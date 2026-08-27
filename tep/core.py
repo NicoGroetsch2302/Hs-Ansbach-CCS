@@ -107,8 +107,7 @@ def scale(X: np.ndarray, mode: str, scaler=None) -> np.ndarray:
     """
     if mode == "scaler":
         if scaler is None:
-            raise RuntimeError("scaling_mode='scaler', aber kein Scaler "
-                               "uebergeben (fit_scaler zuerst aufrufen).")
+            raise RuntimeError("scaling_mode='scaler', aber kein Scaler übergeben (fit_scaler zuerst aufrufen).")
         return scaler.transform(X)
     if mode != "global_mean":
         raise ValueError(f"Unbekannter scaling_mode: {mode!r}")

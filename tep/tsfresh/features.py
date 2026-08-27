@@ -23,8 +23,7 @@ import pandas as pd
 from sklearn.feature_selection import f_classif
 from tqdm.auto import tqdm
 from tsfresh import extract_features
-from tsfresh.feature_extraction.settings import (
-    ComprehensiveFCParameters, EfficientFCParameters, MinimalFCParameters)
+from tsfresh.feature_extraction.settings import ComprehensiveFCParameters, EfficientFCParameters, MinimalFCParameters
 from tsfresh.feature_selection.relevance import calculate_relevance_table
 from tsfresh.utilities.dataframe_functions import impute
 
@@ -39,15 +38,11 @@ FC_MODES = {"minimal": MinimalFCParameters,
 def fc_parameters(fc_mode: str = "efficient") -> dict:
     """Der TSFresh-Calculator-Satz zu einem Kuerzel."""
     if fc_mode not in FC_MODES:
-        raise ValueError(f"fc_mode={fc_mode!r} unbekannt "
-                         f"(bekannt: {sorted(FC_MODES)})")
+        raise ValueError(f"fc_mode={fc_mode!r} unbekannt (bekannt: {sorted(FC_MODES)})")
     return FC_MODES[fc_mode]()
 
 
-def cache_dir(scaling_mode: str = "global_mean", smoke_test: bool = False,
-              runs_per_fault: int | None = None, *, fc_mode: str,
-              run_length: int | None, chunk_runs: int, data_dir: str,
-              **proj_params) -> str:
+def cache_dir(scaling_mode: str = "global_mean", smoke_test: bool = False, runs_per_fault: int | None = None, *, fc_mode: str, run_length: int | None, chunk_runs: int, data_dir: str, **proj_params) -> str:
     """Cache-Ordner fuer GENAU diese Parameter, angelegt falls noetig.
 
     Alles, was den Inhalt eines Chunks bestimmt, steht im Ordnernamen:
@@ -56,24 +51,12 @@ def cache_dir(scaling_mode: str = "global_mean", smoke_test: bool = False,
     begegnen - gibt es den Ordner nicht, wird neu gerechnet und er
     entsteht dabei.
 
-    Vorher standen fc_mode, run_length, chunk_runs und die
-    Verfahrensparameter NICHT im Namen. Ein Lauf mit fc_mode="efficient"
-    las wortlos die Chunks eines minimal-Laufs weiter: 20 statt 1460
-    Spalten, ohne eine Zeile Ausgabe. Zwei Kommentare in params.yaml
-    ("bei Aenderung vorher die Chunks loeschen", "chunk_runs MUSS 250
-    bleiben") baten deshalb um Gedaechtnis - das ist jetzt Aufgabe des
-    Ordnernamens.
+    Geteilt wird der Ordner zwischen den Schwester-Notebooks: gleiche Parameter, gleicher Hash, die raw-Chunks werden wiederverwendet.
 
-    Geteilt wird der Ordner weiterhin absichtlich zwischen den
-    Schwester-Notebooks: gleiche Parameter, gleicher Hash, die
-    raw-Chunks werden wiederverwendet.
-
-    `parameter.json` im Ordner sagt, wofuer der Hash steht.
+    `parameter.json` im Ordner sagt, wofür der Hash steht.
     """
-    identitaet = dict(scaling_mode=scaling_mode, smoke_test=smoke_test,
-                      runs_per_fault=runs_per_fault, fc_mode=fc_mode,
-                      run_length=run_length, chunk_runs=chunk_runs,
-                      data_dir=data_dir, **proj_params)
+    identitaet = dict(scaling_mode=scaling_mode, smoke_test=smoke_test, runs_per_fault=runs_per_fault,
+                      fc_mode=fc_mode, run_length=run_length, chunk_runs=chunk_runs, data_dir=data_dir, **proj_params)
     kurz = hashlib.sha1(
         json.dumps(identitaet, sort_keys=True, default=str).encode()
     ).hexdigest()[:6]
@@ -112,8 +95,7 @@ def load_top_names(cache: str, spec, top_k: int) -> list | None:
 
 
 def save_top_names(cache: str, spec, top_k: int, names: list) -> None:
-    with open(top_features_path(cache, spec, top_k), "w",
-              encoding="utf-8") as fh:
+    with open(top_features_path(cache, spec, top_k), "w", encoding="utf-8") as fh:
         json.dump(names, fh, indent=1)
 
 
@@ -136,23 +118,12 @@ def _subset(part: pd.DataFrame, usecols) -> pd.DataFrame:
     return part[usecols]
 
 
-def extract_config(spec, split: str, runs: dict, cache: str, *,
-                   tag: str = "full", fc_params=None, kind_to_fc=None,
-                   usecols=None, chunk_runs: int = 250,
-                   n_jobs: int | None = None,
-                   scaling_mode: str = "global_mean", scaler=None,
-                   fix_signs: bool = True, **proj_params) -> pd.DataFrame:
+def extract_config(spec, split: str, runs: dict, cache: str, *, tag: str = "full", fc_params=None, kind_to_fc=None, usecols=None, chunk_runs: int = 250, n_jobs: int | None = None, scaling_mode: str = "global_mean", scaler=None, fix_signs: bool = True, **proj_params) -> pd.DataFrame:
     """Extrahiert TSFresh-Features fuer EINE Konfiguration.
 
-    tag         : Cache-Kennung ("full" = alle Features, "top{K}" = nur die
-                  Top-K aus extract_and_select_features()). Bei "top" MUSS
-                  K im Tag
-                  stehen, sonst
-                  kollidieren Laeufe mit unterschiedlichem top_k im selben
-                  Cache.
+    tag         : Cache-Kennung ("full" = alle Features, "top{K}" = nur die Top-K aus extract_and_select_features()). Bei "top" MUSS K im Tag stehen, sonst kollidieren Laeufe mit unterschiedlichem top_k im selben Cache.
     fc_params   : Calculator-Satz (aus fc_parameters()); bei kind_to_fc egal
-    kind_to_fc  : wenn gesetzt, werden NUR diese Features berechnet
-                  (aus tsfresh.from_columns) - billig fuer apply_features()
+    kind_to_fc  : wenn gesetzt, werden NUR diese Features berechnet(aus tsfresh.from_columns) - billig fuer apply_features()
     usecols     : beim Laden aus dem Cache nur diese Spalten behalten (RAM)
     proj_params : gehen unveraendert an project()
 
@@ -177,8 +148,7 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
     keys = sorted(runs.keys())
     parts, first_errors, n_failed = [], [], 0
 
-    it = tqdm(list(range(0, len(keys), chunk_runs)),
-              desc=f"{name:20s} [{split}/{tag}]")
+    it = tqdm(list(range(0, len(keys), chunk_runs)), desc=f"{name:20s} [{split}/{tag}]")
 
     for ci, start in enumerate(it):
         path = chunk_path(cache, spec, split, tag, ci)
@@ -196,11 +166,9 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
             except Exception as exc:
                 n_failed += 1      # z.B. numerisches Scheitern der DyCA-Stufe
                 if len(first_errors) < 5:
-                    first_errors.append(f"  fault={key[0]}, run={key[1]}: "
-                                        f"{exc}")
+                    first_errors.append(f"  fault={key[0]}, run={key[1]}: {exc}")
                 continue
-            d = {"id": np.full(Y.shape[0], run_id(*key), dtype=np.int32),
-                 "time": np.arange(Y.shape[0], dtype=np.int32)}
+            d = {"id": np.full(Y.shape[0], run_id(*key), dtype=np.int32), "time": np.arange(Y.shape[0], dtype=np.int32)}
             for c, nm in enumerate(names):
                 d[nm] = Y[:, c]
             frames.append(pd.DataFrame(d))
@@ -226,8 +194,7 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
         gc.collect()
 
     if n_failed:
-        print(f"    {name}: {n_failed} Runs uebersprungen "
-              f"(Projektion fehlgeschlagen)")
+        print(f"    {name}: {n_failed} Runs uebersprungen (Projektion fehlgeschlagen)")
     if not parts:
         # Frueher kam hier ein leeres DataFrame zurueck:
         # extract_and_select_features schrieb daraus eine leere Top-K-
@@ -235,14 +202,11 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
         # weiteren Lauf still leer liess. Eine unmoegliche Spec (dyca mit
         # m < n - m) fiel damit erst Stunden spaeter auf. Die Meldung der
         # Bibliothek steht dabei - sie sagt genau, was nicht geht.
-        raise RuntimeError(
-            f"{name}/{split}: KEIN einziger Run erfolgreich "
-            f"({n_failed} Fehler).\n" + "\n".join(first_errors))
+        raise RuntimeError(f"{name}/{split}: KEIN einziger Run erfolgreich ({n_failed} Fehler).\n" + "\n".join(first_errors))
     return pd.concat(parts)
 
 
-def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000,
-                  n_jobs: int | None = None) -> pd.DataFrame:
+def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000, n_jobs: int | None = None) -> pd.DataFrame:
     """Bewertet alle Spalten von X und liefert eine sortierte Rangtabelle.
 
     Sortierkriterium: n_significant absteigend (Zahl der Klassen, die das
@@ -261,9 +225,7 @@ def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000,
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            rt = calculate_relevance_table(
-                Xb, y, ml_task="classification", multiclass=True,
-                n_significant=1, n_jobs=n_jobs)
+            rt = calculate_relevance_table(Xb, y, ml_task="classification", multiclass=True, n_significant=1, n_jobs=n_jobs)
             f_val, _ = f_classif(Xb.to_numpy(), y.to_numpy())
 
         p_cols = [c for c in rt.columns if c.startswith("p_value_")]
@@ -271,17 +233,14 @@ def rank_features(X: pd.DataFrame, y: pd.Series, block_cols: int = 4000,
             "feature": rt["feature"].to_numpy(),
             "n_significant": rt["n_significant"].to_numpy(),
             "p_min": rt[p_cols].min(axis=1).to_numpy(),
-            "f_value": pd.Series(f_val, index=Xb.columns)
-                         .reindex(rt["feature"]).to_numpy(),
+            "f_value": pd.Series(f_val, index=Xb.columns).reindex(rt["feature"]).to_numpy(),
         }))
         del Xb
         gc.collect()
 
     if not parts:
-        return pd.DataFrame(
-            columns=["feature", "n_significant", "p_min", "f_value"])
+        return pd.DataFrame(columns=["feature", "n_significant", "p_min", "f_value"])
 
     rank = pd.concat(parts, ignore_index=True)
     rank["f_value"] = rank["f_value"].fillna(0.0)
-    return rank.sort_values(["n_significant", "f_value"],
-                            ascending=[False, False]).reset_index(drop=True)
+    return rank.sort_values(["n_significant", "f_value"], ascending=[False, False]).reset_index(drop=True)
