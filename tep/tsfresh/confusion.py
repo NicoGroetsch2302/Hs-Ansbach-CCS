@@ -27,9 +27,8 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              confusion_matrix, f1_score)
 
 from ..core import LABELS, default_estimator
-from ..plotting import counts_frame, draw_confusion, normalize_rows
-from ..plotting import plot_grid as grid
-from ..plotting import print_top_confusions
+from ..plotting import (counts_frame, draw_confusion, normalize_rows,
+                        plot_grid, print_top_confusions)
 from .pipeline import common_runs, matrices
 
 
@@ -158,14 +157,15 @@ def confusion(config_names: list, pred_path: str, train_top: dict | None =
     return cm_res
 
 
-def plot_grid(cm: dict, top_k: int = 100, ncols: int = 4):
+def plot_confusion_grid(cm: dict, top_k: int = 100,
+                        ncols: int = 4):
     """Alle Matrizen im Raster, zeilenweise normiert (Diagonale = Recall),
     gemeinsame Farbskala 0..1 fuer direkte Vergleichbarkeit.
 
     Die Zellen werden hier NICHT beschriftet - bei vielen 21x21-Panels waere
-    die Schrift unlesbar. Exakte Zahlen: cm["counts"][name] oder plot_detail().
+    die Schrift unlesbar. Exakte Zahlen: cm["counts"][name] oder plot_confusion_detail().
     """
-    return grid(
+    return plot_grid(
         [cm["results"][n]["cm_norm"] for n in names(cm)],
         [f"{n}\nMacro-F1 {cm['results'][n]['macro_f1']:.3f} | "
          f"BA {cm['results'][n]['bal_acc']:.3f}" for n in names(cm)],
@@ -174,7 +174,7 @@ def plot_grid(cm: dict, top_k: int = 100, ncols: int = 4):
         ncols=ncols)
 
 
-def plot_detail(cm: dict, focus: str | None = None,
+def plot_confusion_detail(cm: dict, focus: str | None = None,
                 annot_min: float = 0.05, top_n: int = 8,
                 report: bool = True):
     """Eine Konfiguration gross, mit beschrifteten auffaelligen Zellen.
@@ -225,7 +225,8 @@ def plot_detail(cm: dict, focus: str | None = None,
 def plot_recall(cm: dict, n_worst: int = 5):
     """Recall je Fault-Klasse und Konfiguration als Heatmap.
 
-    Rueckgabe (fig, tab) wie plot_detail - main.py speichert die Figur.
+    Rueckgabe (fig, tab) wie plot_confusion_detail - main.py
+    speichert die Figur.
     """
     import matplotlib.pyplot as plt
 
