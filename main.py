@@ -36,7 +36,7 @@ from tep.eigen import (aggregate, csv_name, export, faultfree_by_run,  # noqa
                        fit_scaler, get, load_train, merge_faults,
                        needs_scaler, plot_bars, plot_cv, plot_means,
                        plot_scalar, plot_stds, run_spectra)
-from tep.eigen.classify import (class_distribution, confusion,         # noqa
+from tep.eigen.classify import (class_distribution, confusion_eigen,   # noqa
                                 feature_sets, plot_confusions,
                                 report_confusions, run_lazyclassifier,
                                 test_spectra, train_spectra)
@@ -45,8 +45,7 @@ from tep.tsfresh import (apply_features, benchmark_models, cache_dir,  # noqa
                          load_summary, plot_comparison,
                          plot_confusion_detail, plot_confusion_grid,
                          plot_recall, project, validate,
-                         extract_and_select_features)
-from tep.tsfresh import confusion as tsfresh_confusion                 # noqa
+                         confusion_tsfresh, extract_and_select_features)
 
 
 def save(fig, name):
@@ -216,7 +215,7 @@ def _classify_spectra(e):
         pd.concat(rows).to_csv(board, index=False)
         print(f"  Leaderboards -> {board}")
 
-    results = confusion(sets, e["random_state"])
+    results = confusion_eigen(sets, e["random_state"])
     save(plot_confusions(results), "eigen_spektren_confusion")
     report_confusions(results)
 
@@ -276,7 +275,7 @@ def stage_tsfresh():
     save(plot_comparison(compare(summary, names), t["label"], t["top_k"]),
          f"tsfresh_{family}_vergleich")
 
-    cm = tsfresh_confusion(names, pred_path, train_top, test_top,
+    cm = confusion_tsfresh(names, pred_path, train_top, test_top,
                            summary_path=summary_path)
     save(plot_confusion_grid(cm, t["top_k"]),
          f"tsfresh_{family}_confusion_raster")

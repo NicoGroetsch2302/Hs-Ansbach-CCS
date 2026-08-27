@@ -248,8 +248,8 @@ def run_lazyclassifier(fs: dict, cv_folds: int = 5,
 # Confusion-Matrizen
 # =========================================================================
 
-def confusion(sets: list, random_state: int = 42, estimator=None,
-              report: bool = True) -> dict:
+def confusion_eigen(sets: list, random_state: int = 42, estimator=None,
+                    report: bool = True) -> dict:
     """Fester Modelltyp auf jedem Feature-Satz, einmal auf dem Testset
     ausgewertet. Die Unterschiede liegen damit allein an den Features."""
     results = {}

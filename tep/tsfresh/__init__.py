@@ -5,7 +5,7 @@ Einstellungen stehen als Argumente daran, nicht in einem Konfigurations-
 objekt:
 
     from tep.tsfresh import (apply_features, benchmark_models, cache_dir,
-                             compare, confusion, describe,
+                             compare, confusion_tsfresh, describe,
                              extract_and_select_features, plot_comparison,
                              plot_confusion_grid, validate)
 
@@ -24,7 +24,7 @@ objekt:
                                        SUMMARY_CSV)
 
     cmp = compare(summary, NAMES); plot_comparison(cmp)
-    cm = confusion(NAMES, PRED_CSV, train_top, test_top)
+    cm = confusion_tsfresh(NAMES, PRED_CSV, train_top, test_top)
     plot_confusion_grid(cm, TOP_K)
 
 Module
@@ -42,8 +42,9 @@ werden mit `tep.eigen` geteilt.
 
 from ..core import (LABELS, META_COLS, PRE_FAULT_CUTOFF, PROC_COLS,
                     SPLIT_FILES, fit_scaler, labels_from_index, run_id)
-from .confusion import (best, confusion, names, plot_confusion_detail,
-                        plot_confusion_grid, plot_recall, recall_table)
+from .confusion import (best, confusion_tsfresh, names,
+                        plot_confusion_detail, plot_confusion_grid,
+                        plot_recall, recall_table)
 from .data import load_runs
 from .features import cache_dir, extract_config, fc_parameters, rank_features
 from .pipeline import (apply_features, benchmark_models, common_runs,
@@ -62,6 +63,6 @@ __all__ = [
     "PROJECTORS", "project", "config_name", "channel_names", "n_channels",
     "extract_config", "rank_features",
     "compare", "plot_comparison",
-    "confusion", "names", "best", "recall_table",
+    "confusion_tsfresh", "names", "best", "recall_table",
     "plot_confusion_grid", "plot_confusion_detail", "plot_recall",
 ]

@@ -5,7 +5,7 @@ Konfigurationen -> die Unterschiede zwischen den Matrizen liegen allein an
 den Features. Datenbasis exakt wie benchmark_models(): gemeinsame Runs,
 gleiche NaN-Behandlung, StandardScaler + RandomForest (wie lazypredict intern).
 
-`confusion()` liefert ein dict:
+`confusion_tsfresh()` liefert ein dict:
 
     {"order":   Konfigurationsnamen in Notebook-Reihenfolge,
      "pred":    DataFrame Konfiguration/run_id/y_true/y_pred,
@@ -56,10 +56,11 @@ def recall_table(cm: dict) -> pd.DataFrame:
     return tab
 
 
-def confusion(config_names: list, pred_path: str, train_top: dict | None =
-              None, test_top: dict | None = None, *, refit: bool = False,
-              estimator=None, random_state: int = 42,
-              summary_path: str | None = None) -> dict:
+def confusion_tsfresh(config_names: list, pred_path: str,
+                      train_top: dict | None = None,
+                      test_top: dict | None = None, *, refit: bool = False,
+                      estimator=None, random_state: int = 42,
+                      summary_path: str | None = None) -> dict:
     """Vorhersagen holen (Cache oder Neuberechnung) und Matrizen bauen.
 
     refit=False nutzt den Vorhersage-Cache, falls vorhanden. refit=True
@@ -163,7 +164,8 @@ def plot_confusion_grid(cm: dict, top_k: int = 100,
     gemeinsame Farbskala 0..1 fuer direkte Vergleichbarkeit.
 
     Die Zellen werden hier NICHT beschriftet - bei vielen 21x21-Panels waere
-    die Schrift unlesbar. Exakte Zahlen: cm["counts"][name] oder plot_confusion_detail().
+    die Schrift unlesbar. Exakte Zahlen: cm["counts"][name] oder
+    plot_confusion_detail().
     """
     return plot_grid(
         [cm["results"][n]["cm_norm"] for n in names(cm)],
