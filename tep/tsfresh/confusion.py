@@ -78,7 +78,8 @@ def confusion(config_names: list, pred_path: str, train_top: dict | None =
         if not train_top or not test_top:
             raise RuntimeError(
                 "train_top/test_top fehlen und es gibt keinen Vorhersage-"
-                "Cache -> zuerst select_features() und apply_features() "
+                "Cache -> zuerst extract_and_select_features() und "
+                "apply_features() "
                 "ausfuehren (laufen aus dem Chunk-Cache).")
         idx_tr, idx_te = common_runs(train_top, test_top)
         print(f"Gemeinsame Runs: Train {len(idx_tr)}, Test {len(idx_te)}")

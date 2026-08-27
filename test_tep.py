@@ -352,8 +352,9 @@ def test_save_legt_unterordner_an():
 
 def test_extract_config_wirft_statt_leer_zurueck():
     """Scheitert die Projektion an JEDEM Run - hier dyca mit m < n - m -,
-    kam frueher ein leeres DataFrame zurueck. select_features schrieb
-    daraus eine leere Top-K-Auswahl in den Cache, die jeden weiteren Lauf
+    kam frueher ein leeres DataFrame zurueck.
+    extract_and_select_features schrieb daraus eine leere Top-K-Auswahl in
+    den Cache, die jeden weiteren Lauf
     still leer liess. Jetzt fliegt es, mit der Meldung der Bibliothek."""
     import tempfile
 

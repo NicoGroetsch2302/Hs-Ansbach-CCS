@@ -5,8 +5,9 @@ Einstellungen stehen als Argumente daran, nicht in einem Konfigurations-
 objekt:
 
     from tep.tsfresh import (apply_features, benchmark_models, cache_dir,
-                             compare, confusion, describe, plot_comparison,
-                             plot_confusion_grid, select_features, validate)
+                             compare, confusion, describe,
+                             extract_and_select_features, plot_comparison,
+                             plot_confusion_grid, validate)
 
     CONFIGS = [("raw",), ("pca", 6), ("dyca", 6, 12)]
     SCALING, DATA_DIR, TOP_K = "global_mean", "data_csv", 100
@@ -14,7 +15,7 @@ objekt:
     NAMES = validate(CONFIGS)
 
     describe(CONFIGS, CACHE, top_k=TOP_K, scaling_mode=SCALING)
-    train_top, top_names = select_features(CONFIGS, CACHE,
+    train_top, top_names = extract_and_select_features(CONFIGS, CACHE,
                                            data_dir=DATA_DIR, top_k=TOP_K,
                                            scaling_mode=SCALING)
     test_top = apply_features(CONFIGS, CACHE, top_names, data_dir=DATA_DIR,
@@ -48,7 +49,8 @@ from .confusion import plot_recall
 from .data import load_runs
 from .features import cache_dir, extract_config, fc_parameters, rank_features
 from .pipeline import (apply_features, benchmark_models, common_runs,
-                       describe, load_summary, matrices, extract_and_select_features)
+                       describe, extract_and_select_features, load_summary,
+                       matrices)
 from .projections import (PROJECTORS, channel_names, config_name, n_channels,
                           project, validate)
 from .reporting import compare, plot_comparison

@@ -1,6 +1,7 @@
 """Die drei Schritte des Laufs, jeder als eigene Funktion.
 
-    select_features   Trainingsruns extrahieren, bewerten, Top-K behalten
+    extract_and_select_features
+                      Trainingsruns extrahieren, bewerten, Top-K behalten
     apply_features    Testruns extrahieren, aber NUR die gewaehlten Merkmale
     benchmark_models  LazyClassifier je Konfiguration -> summary-CSV
 
@@ -8,7 +9,8 @@ Jeder Schritt nimmt entgegen, was sie braucht, und gibt zurueck, was die
 naechste braucht - kein gemeinsames Objekt, das den Zustand haelt:
 
     names = validate(CONFIGS)
-    train_top, top_names = select_features(CONFIGS, CACHE, data_dir=..., ...)
+    train_top, top_names = extract_and_select_features(CONFIGS, CACHE,
+                                                       data_dir=..., ...)
     test_top = apply_features(CONFIGS, CACHE, top_names, data_dir=..., ...)
     summary = benchmark_models(CONFIGS, train_top, test_top, summary_path)
 
@@ -153,8 +155,9 @@ def apply_features(configs, cache: str, top_names: dict, *,
                    scaler=None, fix_signs: bool = True, **proj_params) -> dict:
     """Testset extrahieren - nur die gewaehlten Merkmale."""
     if not top_names:
-        raise RuntimeError("top_names fehlt -> zuerst select_features() "
-                           "(laeuft aus dem Cache).")
+        raise RuntimeError("top_names fehlt -> zuerst "
+                           "extract_and_select_features() (laeuft aus dem "
+                           "Cache).")
 
     print("Lade Testruns ...")
     runs_test = load_runs("test", data_dir, runs_per_fault, run_length)
@@ -164,7 +167,7 @@ def apply_features(configs, cache: str, top_names: dict, *,
         name = config_name(spec)
         t0 = time.perf_counter()
         # top_k MUSS in der Cache-Kennung stehen: die Chunks enthalten
-        # genau die in select_features() ausgewaehlten Features. Ohne top_k im
+        # genau die dort ausgewaehlten Features. Ohne top_k im
         # Namen wuerde ein spaeterer Lauf mit groesserem top_k die alten
         # Chunks wiederverwenden - und Features verlangen, die nicht
         # darin stehen (_subset in features.py wirft dann).
@@ -208,7 +211,8 @@ def common_runs(train_top: dict, test_top: dict):
     """
     if not train_top or not test_top:
         raise RuntimeError("train_top/test_top fehlen -> zuerst "
-                           "select_features() und apply_features().")
+                           "extract_and_select_features() und "
+                           "apply_features().")
     tr = sorted(set.intersection(*(set(d.index) for d in train_top.values())))
     te = sorted(set.intersection(*(set(d.index) for d in test_top.values())))
     return tr, te

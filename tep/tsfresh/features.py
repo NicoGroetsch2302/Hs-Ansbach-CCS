@@ -145,7 +145,8 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
     """Extrahiert TSFresh-Features fuer EINE Konfiguration.
 
     tag         : Cache-Kennung ("full" = alle Features, "top{K}" = nur die
-                  Top-K aus select_features()). Bei "top" MUSS K im Tag
+                  Top-K aus extract_and_select_features()). Bei "top" MUSS
+                  K im Tag
                   stehen, sonst
                   kollidieren Laeufe mit unterschiedlichem top_k im selben
                   Cache.
@@ -228,8 +229,9 @@ def extract_config(spec, split: str, runs: dict, cache: str, *,
         print(f"    {name}: {n_failed} Runs uebersprungen "
               f"(Projektion fehlgeschlagen)")
     if not parts:
-        # Frueher kam hier ein leeres DataFrame zurueck: select_features
-        # schrieb daraus eine leere Top-K-Auswahl in den Cache, die jeden
+        # Frueher kam hier ein leeres DataFrame zurueck:
+        # extract_and_select_features schrieb daraus eine leere Top-K-
+        # Auswahl in den Cache, die jeden
         # weiteren Lauf still leer liess. Eine unmoegliche Spec (dyca mit
         # m < n - m) fiel damit erst Stunden spaeter auf. Die Meldung der
         # Bibliothek steht dabei - sie sagt genau, was nicht geht.

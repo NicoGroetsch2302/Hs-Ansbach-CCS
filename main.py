@@ -44,7 +44,8 @@ from tep.tsfresh import (apply_features, benchmark_models, cache_dir,  # noqa
                          compare, config_name, describe, load_runs,
                          load_summary, plot_comparison,
                          plot_confusion_detail, plot_confusion_grid,
-                         plot_recall, project, extract_and_select_features, validate)
+                         plot_recall, project, validate,
+                         extract_and_select_features)
 from tep.tsfresh import confusion as tsfresh_confusion                 # noqa
 
 
